@@ -79,3 +79,7 @@ Hooked com.android.settings
 ```
 
 需要 Android SDK 37（在 `local.properties` 里配好 `sdk.dir`）与 JDK 17+。
+
+## 许可
+
+MIT —— 见 [LICENSE](LICENSE)。
