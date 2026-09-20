@@ -49,9 +49,14 @@ class CircleIconDrawable(icon: Drawable) :
    * 副本必须是新实例，且仍然要是 [AdaptiveIconDrawable]（否则 launcher 又走 wrap 路径）。
    */
   override fun getConstantState(): ConstantState? {
-    val inner = background?.constantState ?: return null
+    val inner = background?.constantState
+    // 同样**不能返回 null**：Launcher3 的 FloatingIconView 直接调
+    // getConstantState().newDrawable()，null = NPE = 桌面进程崩。
+    // CenteredIconDrawable 已保证非 null，这里的兜底只是防止把 launcher 带崩。
     return object : ConstantState() {
-      override fun newDrawable(): Drawable = CircleIconDrawable(inner.newDrawable())
+      override fun newDrawable(): Drawable =
+        CircleIconDrawable(inner?.newDrawable() ?: ColorDrawable(Color.TRANSPARENT))
+
       override fun getChangingConfigurations(): Int = changingConfigurations
     }
   }
@@ -102,6 +107,32 @@ private class CenteredIconDrawable(private val icon: Drawable) : Drawable() {
   override fun getIntrinsicWidth(): Int = icon.intrinsicWidth
 
   override fun getIntrinsicHeight(): Int = icon.intrinsicHeight
+
+  /**
+   * 必须实现，而且**绝不能返回 null**。
+   *
+   * `Drawable` 默认实现返回 null，而 Launcher3 的 `FloatingIconView`（点击桌面图标时
+   * 那个图标浮起的动画）在 `getIconResult()` 里直接写
+   * `icon.getConstantState().newDrawable()` —— 拿到 null 就是 NPE，整个桌面进程崩掉。
+   * 上一版正是漏了这里，导致"点一下图标桌面就崩"。
+   */
+  override fun getConstantState(): ConstantState? {
+    val src = icon.constantState
+    return if (src != null) {
+      object : ConstantState() {
+        override fun newDrawable(): Drawable = CenteredIconDrawable(src.newDrawable())
+        override fun getChangingConfigurations(): Int = src.changingConfigurations
+      }
+    } else {
+      // 原图标自己也不支持 ConstantState（自定义 Drawable 常见）。
+      // 这种没法安全地"重建一个等价副本"，就退回复用同一个原图标 ——
+      // 比返回 null 崩掉桌面好得多；FloatingIconView 只是临时画一下这个副本。
+      object : ConstantState() {
+        override fun newDrawable(): Drawable = CenteredIconDrawable(icon)
+        override fun getChangingConfigurations(): Int = changingConfigurations
+      }
+    }
+  }
 }
 
 /**
