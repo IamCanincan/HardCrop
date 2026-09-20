@@ -8,7 +8,8 @@
 
 ## 安装
 
-1. 安装 `app-release.apk`（或用源码自行构建）。
+1. 从 [Releases](https://github.com/IamCanincan/HardCrop/releases) 下载最新 APK 并安装
+   （或按下面的「构建」自行编译）。
 2. 在 LSPosed 里启用模块。作用域由模块自己声明（`staticScope=true`），管理器里**只能**勾选
    这 6 个进程，`scope.list` 之外的一个也加不进去 —— 想加别的应用会被框架直接拒绝：
 
@@ -163,7 +164,8 @@ com.android.launcher3`（launcher3 进程里有两个 `createBadgedIconBitmap` �
 - **已是最新** → 远端比本机旧也算这一类，说明装的是还没发布出去的构建，
   不该提示去「升级」到一个更老的版本
 - **失败** → 区分「解析不了域名」「连接超时」「TLS 握手失败」，以及 GitHub 的
-  403（限流）／404（仓库还没发过 Release，这属于正常状态，不是故障）
+  403（限流）／404（仓库当前没有 Release，发版后不该再出现；保留这个分支是为了
+  把「没发过版」和「网络故障」分开，不当成红色故障显示）
 
 > 排查提示：如果 App 报「解析不了域名」，而 `adb shell` 里 `curl` 同一个地址是通的，
 > 那不是 DNS 问题 —— 是 `netpolicy` 里这个 uid 的陈旧记录把它设成了 `REJECT_ALL`
