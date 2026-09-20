@@ -1,0 +1,5 @@
+[libraries]
+libxposed-api = { module = "io.github.libxposed:api", version = "102.0.0" }
+
+[plugins]
+android-application = { id = "com.android.application", version = "9.4.1" }
