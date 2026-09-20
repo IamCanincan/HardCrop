@@ -71,6 +71,32 @@ Hooked com.android.settings
   早于 LSPosed daemon，未被注入，这一处看到的还是原图 —— 这是 LSPosed/Zygisk 启动时机的限制。
   重启一次让 `system_server` 也能进入注入、或者只关心 launcher 桌面/抽屉的话，效果完整。
 
+## 关于 AOSP Launcher3（Pixel / Quickstep 自带桌面）
+
+**实测发现**：在 Android 12+ 的 AOSP Launcher3 上，launcher 会**对所有桌面图标**（包括自适应图标
+如 Chrome / Gmail / 系统应用等）**强制应用 launcher 自带的白圆背景板 + safe zone 缩小**——
+这是 launcher 自身的"统一图标形状"渲染流程，发生在 launcher 拿到 Drawable 之后，与模块无关。
+
+直接验证方式：
+1. 禁用本模块（`/data/adb/lspd/cli modules disable com.hardcrop`），重启 launcher3，打开抽屉
+2. 启用本模块，重启 launcher3，打开抽屉
+3. 两张截图对比 —— 如果两张图看起来一模一样、且所有图标（包括自适应图标）都是"白圆 + 缩小"，
+   就说明白圆是 launcher 加的，不是模块加的。
+
+这就是说：
+- 在 AOSP Launcher3 上，**所有图标**看起来都是"白圆 + 缩小"，自适应图标也不例外；
+  本模块让非自适应图标**和自适应图标一模一样**地呈现。
+- 但用户常说的"和自适应图标一样"如果指的是 adaptive 图标**本身**那种"图标填满圆形、无白边"的观感，
+  **那在 AOSP Launcher3 上没有任何桌面图标能呈现**——AOSP launcher 给所有图标都加了同一块白圆板。
+
+要看到模块让"非自适应图标填满圆形、无白边"的真正效果，**换用第三方桌面**：
+Lawnchair / Nova Launcher / Action Launcher / Niagara / Smart Launcher / Microsoft Launcher 等
+不强制"统一图标形状"背景板的桌面都可以。在这些桌面上，模块的圆形裁切会原样生效，
+图标填满圆形、圆外透明，与自适应图标的视觉表现完全一致。
+
+如果坚持 AOSP Launcher3，可以试关闭系统的"Themed icons"（部分 OEM 在壁纸与样式里有开关）——
+但 AOSP Launcher3 的白圆板**仍会**显示，所以"无白边"仍然做不到。
+
 ## 构建
 
 ```bash
