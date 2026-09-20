@@ -87,11 +87,31 @@ Hooked com.android.settings
   ```
 
   这条报错就是判定静态作用域真正生效的依据。
-- `autoHotReload=false`：改动代码后必须重启目标进程，框架不会热加载。
+- `autoHotReload=false`（框架默认值，显式写出）：改动代码后必须重启目标进程，框架不会热加载。
+- `exceptionMode=protective`（框架默认值，显式写出）：hook 里抛出的异常由框架吞掉，
+  不让单个图标加载失败带崩 launcher / systemui —— 这两个都是常驻关键进程。
 - 框架开启 dex 混淆时只改写框架自己的隐藏包名，不会动
   `com.iamcanincan.hardcrop.XposedMain`，入口类名由 proguard `-keep` 保证不被 R8 改名。
   注意 `META-INF/xposed/java_init.list` 里写的也是全限定名，改包名时三处
   （`namespace`/`applicationId`、proguard `-keep`、`java_init.list`）必须一起改。
+
+### 模块元数据分别落在哪
+
+| 内容 | 位置 |
+|---|---|
+| 模块名 | `AndroidManifest` 的 `android:label`（`@string/appName`）|
+| **模块描述** | `AndroidManifest` 的 `android:description`（`@string/xposed_description`）|
+| 作用域 | `META-INF/xposed/scope.list` |
+| 模块配置 | `META-INF/xposed/module.prop` |
+| Java 入口 | `META-INF/xposed/java_init.list` |
+
+管理器读的是 `ApplicationInfo.descriptionRes`，**不是** `module.prop` 里的 `description=`。
+后者是 API <= 93 的旧写法，混着写会让管理器把模块当「兼容模式」处理，
+作用域列表会退化成列出全部已装应用。Manifest 里也不放任何 `xposed*` meta-data。
+
+另：`META-INF/xposed/` 下的文件是**原样打进 APK** 的（AAPT2 不处理非 res 目录），
+所以 `module.prop` 里一行注释都没有 —— 写什么用户解包就能看到。字段说明放在
+`XposedMain` 的 KDoc 和本文档。
 
 ## 已知取舍
 

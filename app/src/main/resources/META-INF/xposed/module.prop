@@ -1,8 +1,5 @@
 minApiVersion=102
 targetApiVersion=102
-# staticScope=true：作用域由本模块的 META-INF/xposed/scope.list 固定声明，
-# LSPosed 里就只能勾选这 6 个进程（不再让用户随便勾其它应用）。
-# 模块只替换图标的加载结果，对没声明的进程没有任何作用，勾了只会误导。
 staticScope=true
 autoHotReload=false
-description=Force non-adaptive app icons into circles
+exceptionMode=protective

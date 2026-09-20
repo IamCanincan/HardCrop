@@ -2,6 +2,18 @@
 <resources>
     <string name="appName">HardCrop</string>
 
+    <!--
+        模块描述，被 AndroidManifest 的 android:description 引用。
+
+        这是 LibXposed（API 102）模块在管理器里显示描述的**唯一**字段：
+        管理器读的是 ApplicationInfo.descriptionRes。
+        老式写法（xposeddescription meta-data / module.prop 里的 description=）已经不用，
+        那是给 API <= 93 的旧框架用的，留着反而让模块变成「兼容模式」。
+
+        长度约定：中文 <= 26 字，太长在模块列表里会占好几行。当前 19 字。
+    -->
+    <string name="xposed_description">把非自适应图标裁成圆形，已是自适应的不动</string>
+
     <!-- Hero 顶栏 -->
     <string name="hero_subtitle">未配圆形形状的应用图标，强制裁圆</string>
 

@@ -5,9 +5,30 @@
          被注入的进程用的是它们自己的权限，不受这条影响。 -->
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!--
+        纯 LibXposed（现代 API 102）模块，不要放老式 xposed meta-data。
+
+        官方说明（LSPosed wiki · Develop Xposed Modules Using Modern Xposed API）：
+          "Modern API does not use metadata anymore as well. Module name uses
+           android:label; module description uses android:description; scope list
+           uses META-INF/xposed/scope.list; module configuration uses
+           META-INF/xposed/module.prop"
+
+        所以四个元数据分别落在：
+          - 模块名     -> android:label（@string/appName）
+          - 模块描述   -> android:description（@string/xposed_description）
+          - 作用域     -> META-INF/xposed/scope.list
+          - 模块配置   -> META-INF/xposed/module.prop（含 staticScope=true）
+        入口类在 META-INF/xposed/java_init.list。
+
+        老式写法（xposedmodule / xposeddescription / xposedminversion 等 meta-data，
+        以及 module.prop 里的 description=）是给 API <= 93 的旧框架用的，
+        混着放会让管理器把模块当成「兼容模式」处理，作用域列表也会退化成列出全部已装应用。
+    -->
     <application
         android:icon="@mipmap/ic_launcher"
         android:label="@string/appName"
+        android:description="@string/xposed_description"
         android:supportsRtl="true">
 
         <!--
