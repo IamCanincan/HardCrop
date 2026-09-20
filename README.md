@@ -11,16 +11,21 @@
 1. 从 [Releases](https://github.com/IamCanincan/HardCrop/releases) 下载最新 APK 并安装
    （或按下面的「构建」自行编译）。
 2. 在 LSPosed 里启用模块。作用域由模块自己声明（`staticScope=true`），管理器里**只能**勾选
-   这 6 个进程，`scope.list` 之外的一个也加不进去 —— 想加别的应用会被框架直接拒绝：
+   这 7 个进程，`scope.list` 之外的一个也加不进去 —— 想加别的应用会被框架直接拒绝：
 
    ```
-   android                          系统服务，解析应用信息
-   com.android.launcher3            桌面与应用抽屉（效果最直观，必选）
-   com.android.systemui             状态栏与最近任务
-   com.android.settings             设置里的应用列表
-   com.android.intentresolver       分享与打开方式的选择列表
-   com.android.permissioncontroller 权限弹窗里的应用图标
+   android                                 系统服务，解析应用信息
+   com.android.launcher3                   桌面与应用抽屉（类原生 ROM，必选）
+   com.google.android.apps.nexuslauncher   桌面与应用抽屉（Pixel / Nexus，必选）
+   com.android.systemui                    状态栏与最近任务
+   com.android.settings                    设置里的应用列表
+   com.android.intentresolver              分享与打开方式的选择列表
+   com.android.permissioncontroller        权限弹窗里的应用图标
    ```
+
+   两个桌面进程按 ROM 二选一即可：类原生 / AOSP 用 `com.android.launcher3`，
+   Pixel / Nexus 用 `com.google.android.apps.nexuslauncher`。勾选不存在的那个
+   不会报错，只是没有进程会加载它。
 
 3. **重启**（LSPosed 不会热加载模块）。
 
@@ -40,7 +45,8 @@ adb logcat -s HardCrop
 
 ```
 onPackageReady com.android.settings, sdk 36
-PixelLauncher: 2 createBadgedIconBitmap hooked in com.android.launcher3  （仅 launcher3 进程）
+PixelLauncher: 2 createBadgedIconBitmap hooked in com.android.launcher3  （仅桌面进程；
+Pixel 上进程名是 com.google.android.apps.nexuslauncher）
 Hooked com.android.settings
 ```
 
@@ -78,13 +84,14 @@ Hooked com.android.settings
 - 只调用 `io.github.libxposed.api.*`。API 102 会屏蔽 legacy 的 `de.robv.android.xposed.*`，
   本模块没有任何 legacy 调用，dex 内也检索不到该包名；也不依赖 `hiddenapibypass`。
 - `staticScope=true`：作用域由 `META-INF/xposed/scope.list` 固定声明，管理器里只能勾选这
-  6 个进程。实测往里加别的应用会被框架直接拒绝：
+  7 个进程。实测往里加别的应用会被框架直接拒绝：
 
   ```
   Error: com.iamcanincan.hardcrop fixes its scope in module.prop, so
   com.iamcanincan.noticon cannot be added. It claims: android,
-  com.android.launcher3, com.android.systemui, com.android.settings,
-  com.android.intentresolver, com.android.permissioncontroller.
+  com.android.launcher3, com.google.android.apps.nexuslauncher,
+  com.android.systemui, com.android.settings, com.android.intentresolver,
+  com.android.permissioncontroller.
   ```
 
   这条报错就是判定静态作用域真正生效的依据。
@@ -139,8 +146,13 @@ Hooked com.android.settings
 我们的 `CircleIconDrawable`（圆形 + 内容填满、圆外透明）就直接呈现在桌面。
 
 **怎么验证它生效**：日志里会出现 `PixelLauncher: 2 createBadgedIconBitmap hooked in
-com.android.launcher3`（launcher3 进程里有两个 `createBadgedIconBitmap` 重载被挂上）。
+com.android.launcher3`（桌面进程里有两个 `createBadgedIconBitmap` 重载被挂上；
+Pixel 上进程名显示为 `com.google.android.apps.nexuslauncher`）。
 之后看抽屉 —— **所有非自适应图标都会变成圆形 + 内容填满、圆外透明**，跟自适应图标观感一致。
+
+> Launcher3 的内部类（`BaseIconFactory` / `IconOptions`）在不同 ROM 上包名可能不同：
+> 类原生 / AOSP 是 `com.android.launcher3.*`，Pixel / Nexus 可能被重打包到
+> `com.google.android.apps.nexuslauncher.*`。模块会依次尝试这两个包名，命中哪个用哪个。
 
 **旧版 Android（< 16）**：没有这个开关，本 hook 自动 no-op；模块只让 `CircleIconDrawable`
 作为圆形 drawable 返回，是否能看到"无白边"取决于桌面：AOSP Launcher3 上旧行为（白圆 +
