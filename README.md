@@ -117,13 +117,18 @@ Hooked com.android.settings
 ## 已知取舍
 
 - 快捷设置磁贴（`BIND_QUICK_SETTINGS_TILE`）画的是小尺寸单色图形，被排除在外。
-- 从 `ConstantState.newDrawable()` 恢复出来的副本仍然是圆的（模块自己实现了 `ConstantState`）。
 - 通知栏小图标、快捷方式以外的小图标走的是别的资源，不受影响。
-- **生效进程**：模块挂钩应用图标的资源加载通道，已在 launcher 桌面与应用抽屉上
-  实测可见（所有非自适应图标都变成正圆）。**设置页/分享菜单里的应用列表项走的是
-  `system_server` 里 PMS 缓存的 Bitmap 路径**，而 `system_server` 在 boot 时启动往往
-  早于 LSPosed daemon，未被注入，这一处看到的还是原图 —— 这是 LSPosed/Zygisk 启动时机的限制。
-  重启一次让 `system_server` 也能进入注入、或者只关心 launcher 桌面/抽屉的话，效果完整。
+- **桌面图标 & 点击过渡动画**（v1.0.3+）：模块挂钩应用图标的资源加载通道，
+  launcher 桌面、应用抽屉、点击图标那个浮起放大的过渡动画（`FloatingIconView`）
+  都是圆形。后者 v1.0.3 才修好 —— 之前 `FloatingIconView` 拿到 `newDrawable()`
+  后是**直接 `draw()`**，不走 `BaseIconFactory.createBadgedIconBitmap()`，
+  没人应用系统 mask；现在 `CircleIconDrawable` 自己 `draw()` 时用
+  `AdaptiveIconDrawable.getIconMask()`（API 33+）自己 clip 一次，跟
+  `BaseIconFactory` 那条路径用同一个 mask，重复裁切不会把圆角方形之类裁成内切圆。
+- **设置页/分享菜单/SplashScreen**：走 `system_server` 里 PMS 缓存的 Bitmap 路径，
+  而 `system_server` 在 boot 时启动往往早于 LSPosed daemon，未被注入，这一处看到的
+  还是原图。这是 LSPosed/Zygisk 启动时机的限制。**重启一次设备**让 `system_server`
+  也能进入注入；如果只关心 launcher 桌面/抽屉/点击过渡，效果完整。
 
 ## 关于 AOSP Launcher3（Pixel / Quickstep 自带桌面）
 
