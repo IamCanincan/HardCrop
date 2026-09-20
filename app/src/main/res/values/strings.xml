@@ -15,7 +15,8 @@
     <string name="xposed_description">把非自适应图标裁成圆形，已是自适应的不动</string>
 
     <!-- Hero 顶栏 -->
-    <string name="hero_subtitle">未配圆形形状的应用图标，强制裁圆</string>
+    <string name="hero_subtitle">把非圆形的应用图标强制裁成圆形</string>
+    <string name="hero_version_chip">v%1$s · MIT 许可</string>
 
     <!-- 状态卡 -->
     <string name="status_title">模块启用状态</string>
@@ -75,9 +76,9 @@
     <string name="note_launcher3">Android 16 及以上会关掉桌面自带的背景板，图标按原样铺满圆形。</string>
     <string name="note_themed_icon">本 App 图标已提供 monochrome 层，在 Android 13+ 启动器的“主题图标”开关下会染成壁纸取色。</string>
 
-    <!-- 更新卡片（与 Noticon 的 UpdateCard 同型；结果文案在代码里拼，见 UpdateCard）-->
+    <!-- 更新卡片（与 Noticon 的 UpdateCard 同型）-->
     <string name="section_update">更新</string>
-    <!-- 卡片标题和按钮都用这一句 -->
+    <!-- 卡片标题和按钮共用这一句 -->
     <string name="update_title">检查更新</string>
     <string name="action_open_repo">在 GitHub 上查看</string>
     <string name="update_current">当前版本 %1$s</string>
@@ -85,6 +86,13 @@
     <string name="update_go_download">打开发布页</string>
     <string name="update_disclaimer">只有点下面的按钮才会联网：先直连 GitHub，连不上时走公共加速镜像。
         这是本应用唯一的联网行为，没有统计也没有上报。</string>
+
+    <!-- 更新结果（由 UpdateChecker.Result 翻译成 UpdateState.Done.message）-->
+    <string name="update_result_newer">发现新版本 %1$s（当前 %2$s）</string>
+    <string name="update_result_uptodate">已是最新版本（%1$s）</string>
+    <string name="update_result_uptodate_ahead">已是最新（本地 %1$s 比已发布的 %2$s 还新）</string>
+    <string name="update_result_no_release">仓库还没有发布过 Release</string>
+    <string name="update_result_failed">检查失败：%1$s</string>
 
     <!-- 关于 -->
     <string name="section_about">关于</string>

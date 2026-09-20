@@ -20,14 +20,11 @@ import androidx.compose.material.icons.filled.Android
 import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Dashboard
-import androidx.compose.material.icons.filled.FormatListNumbered
 import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.Lightbulb
 import androidx.compose.material.icons.filled.Power
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
-import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.Update
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -56,10 +53,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.iamcanincan.hardcrop.BuildConfig
 import com.iamcanincan.hardcrop.R
@@ -76,12 +75,13 @@ fun HomeScreen() {
   val scope = rememberCoroutineScope()
   val uriHandler = LocalUriHandler.current
   val version = BuildConfig.VERSION_NAME
+  val context = LocalContext.current
   var update by remember { mutableStateOf<UpdateState>(UpdateState.Idle) }
 
   Scaffold(snackbarHost = { SnackbarHost(snackbarHostState) }) { innerPadding ->
     LazyColumn(
       modifier = Modifier.fillMaxSize().padding(innerPadding),
-      contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+      contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 24.dp),
       verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
       item { HeroHeader() }
@@ -109,7 +109,7 @@ fun HomeScreen() {
             scope.launch {
               // 联网不能跑在主线程，扔到 IO 再回来更新界面状态。
               val result = withContext(Dispatchers.IO) { UpdateChecker.check(version) }
-              update = result.toState(version)
+              update = result.toState(context, version)
             }
           },
           onOpenPage = { url -> uriHandler.openUri(url) },
@@ -118,54 +118,73 @@ fun HomeScreen() {
 
       item { SectionLabel(text = stringResource(R.string.section_about)) }
       item { AboutCard() }
-
-      item { Spacer(modifier = Modifier.height(8.dp)) }
-    }
-  }
-}
-
-/** 顶栏：App 图标 + 名称 + 一句话说明（与 Noticon 的头部布局同型）。 */
-@Composable
-private fun HeroHeader() {
-  Row(
-    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
-    verticalAlignment = Alignment.CenterVertically,
-  ) {
-    AppIconBadge()
-    Spacer(modifier = Modifier.width(14.dp))
-    Column(modifier = Modifier.weight(1f)) {
-      Text(
-        text = stringResource(R.string.appName),
-        style = MaterialTheme.typography.titleLarge,
-        color = MaterialTheme.colorScheme.onSurface,
-      )
-      Text(
-        text = stringResource(R.string.hero_subtitle),
-        style = MaterialTheme.typography.bodyMedium,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-      )
     }
   }
 }
 
 /**
- * 头部那个圆形 App 图标。用 primaryContainer 做底、onPrimaryContainer 画内容，
- * 深浅色模式下都能保持对比度，且不引入任何位图资源。
+ * 顶栏：App 图标 + 名称 + 副说明，整块用 `primaryContainer` 色块。
+ * 让第一屏有视觉重量（Material You Expressive 倾向），同时让 hero 不再和下面的卡片"齐平"。
  */
 @Composable
-private fun AppIconBadge() {
+private fun HeroHeader() {
   Surface(
-    shape = RoundedCornerShape(16.dp),
+    shape = MaterialTheme.shapes.large,
     color = MaterialTheme.colorScheme.primaryContainer,
-    modifier = Modifier.size(52.dp),
+    contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
   ) {
-    Box(contentAlignment = Alignment.Center) {
-      Text(
-        text = "HC",
-        style = MaterialTheme.typography.titleMedium,
-        color = MaterialTheme.colorScheme.onPrimaryContainer,
-      )
+    Column(modifier = Modifier.padding(20.dp)) {
+      Row(verticalAlignment = Alignment.CenterVertically) {
+        // 在 primaryContainer 背景上，「HC」方块用 onPrimaryContainer 反色，更突出。
+        Surface(
+          shape = RoundedCornerShape(16.dp),
+          color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.12f),
+          modifier = Modifier.size(52.dp),
+        ) {
+          Box(contentAlignment = Alignment.Center) {
+            Text(
+              text = "HC",
+              style = MaterialTheme.typography.titleMedium,
+              color = MaterialTheme.colorScheme.onPrimaryContainer,
+            )
+          }
+        }
+        Spacer(modifier = Modifier.width(14.dp))
+        Column(modifier = Modifier.weight(1f)) {
+          Text(
+            text = stringResource(R.string.appName),
+            style = MaterialTheme.typography.titleLarge,
+            color = MaterialTheme.colorScheme.onPrimaryContainer,
+          )
+          Spacer(modifier = Modifier.height(2.dp))
+          Text(
+            text = stringResource(R.string.hero_subtitle),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.85f),
+          )
+        }
+      }
+      Spacer(modifier = Modifier.height(14.dp))
+      // 第二行：版本 + MIT（同一行 chip，留出与正文区隔，又不显得空）。
+      VersionChip()
     }
+  }
+}
+
+/** Hero 内部的版本 chip：在 primaryContainer 上用 onPrimaryContainer 的低 alpha。 */
+@Composable
+private fun VersionChip() {
+  Surface(
+    shape = RoundedCornerShape(50),
+    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.12f),
+    contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+  ) {
+    Text(
+      text = stringResource(R.string.hero_version_chip, BuildConfig.VERSION_NAME),
+      style = MaterialTheme.typography.labelSmall,
+      fontFamily = FontFamily.Monospace,
+      modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+    )
   }
 }
 
@@ -323,6 +342,8 @@ private fun ScopeRow(item: ScopeItem) {
         text = stringResource(item.titleRes),
         style = MaterialTheme.typography.bodyLarge,
         color = MaterialTheme.colorScheme.onSurface,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
       )
       Spacer(modifier = Modifier.height(2.dp))
       Text(
@@ -382,24 +403,7 @@ private fun StepsCard() {
 
   ElevatedCard(shape = MaterialTheme.shapes.large) {
     Column {
-      Row(
-        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-      ) {
-        Icon(
-          imageVector = Icons.Default.FormatListNumbered,
-          contentDescription = null,
-          tint = MaterialTheme.colorScheme.primary,
-          modifier = Modifier.size(20.dp),
-        )
-        Spacer(modifier = Modifier.width(12.dp))
-        Text(
-          text = stringResource(R.string.section_steps),
-          style = MaterialTheme.typography.titleSmall,
-          color = MaterialTheme.colorScheme.onSurface,
-        )
-      }
-      HorizontalDivider()
+      // 「启用步骤」已经在外层 SectionLabel 里写了，卡内不再重复。
       steps.forEachIndexed { index, (titleRes, hintRes) ->
         if (index > 0) HorizontalDivider()
         Row(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
@@ -446,21 +450,7 @@ private fun VerifyCard(snackbarHostState: SnackbarHostState) {
 
   ElevatedCard(shape = MaterialTheme.shapes.large) {
     Column(modifier = Modifier.padding(16.dp)) {
-      Row(verticalAlignment = Alignment.CenterVertically) {
-        Icon(
-          imageVector = Icons.Default.Terminal,
-          contentDescription = null,
-          tint = MaterialTheme.colorScheme.primary,
-          modifier = Modifier.size(20.dp),
-        )
-        Spacer(modifier = Modifier.width(12.dp))
-        Text(
-          text = stringResource(R.string.section_verify),
-          style = MaterialTheme.typography.titleSmall,
-          modifier = Modifier.weight(1f),
-        )
-      }
-      Spacer(modifier = Modifier.height(8.dp))
+      // 「验证是否生效」已经在外层 SectionLabel 里写了。
       Text(
         text = stringResource(R.string.verify_body),
         style = MaterialTheme.typography.bodySmall,
@@ -513,29 +503,17 @@ private fun NotesCard() {
     )
 
   ElevatedCard(shape = MaterialTheme.shapes.large) {
-    Column(modifier = Modifier.padding(16.dp)) {
-      Row(verticalAlignment = Alignment.CenterVertically) {
-        Icon(
-          imageVector = Icons.Default.Lightbulb,
-          contentDescription = null,
-          tint = MaterialTheme.colorScheme.primary,
-          modifier = Modifier.size(20.dp),
-        )
-        Spacer(modifier = Modifier.width(12.dp))
-        Text(
-          text = stringResource(R.string.section_notes),
-          style = MaterialTheme.typography.titleSmall,
-        )
-      }
-      Spacer(modifier = Modifier.height(8.dp))
+    Column(modifier = Modifier.padding(vertical = 4.dp, horizontal = 16.dp)) {
+      // 「说明」已经在外层 SectionLabel 里写了。
       notes.forEach { res ->
-        Row(modifier = Modifier.padding(vertical = 6.dp)) {
-          Text(
-            text = "•",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.width(16.dp),
-          )
+        Row(modifier = Modifier.padding(vertical = 6.dp), verticalAlignment = Alignment.Top) {
+          // Surface 小圆点比 "•" 字符精致：在浅色下是一个清晰可见的小点，
+          // 在深色下用 onSurfaceVariant 的 alpha 自动变得柔和。
+          Surface(
+            shape = RoundedCornerShape(50),
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f),
+            modifier = Modifier.padding(top = 7.dp, end = 12.dp).size(6.dp),
+          ) {}
           Text(
             text = stringResource(res),
             style = MaterialTheme.typography.bodySmall,
@@ -607,17 +585,20 @@ private sealed interface UpdateState {
     UpdateState
 }
 
-private fun UpdateChecker.Result.toState(current: String): UpdateState =
+private fun UpdateChecker.Result.toState(ctx: android.content.Context, current: String): UpdateState =
   when (this) {
-    is UpdateChecker.Result.Newer -> UpdateState.Done("发现新版本 $version（当前 $current）", url)
+    is UpdateChecker.Result.Newer ->
+      UpdateState.Done(ctx.getString(R.string.update_result_newer, version, current), url)
     is UpdateChecker.Result.UpToDate ->
-      if (version == current) UpdateState.Done("已是最新版本（$current）")
-      else UpdateState.Done("已是最新（本地 $current 比已发布的 $version 还新）")
+      if (version == current) UpdateState.Done(ctx.getString(R.string.update_result_uptodate, current))
+      else UpdateState.Done(ctx.getString(R.string.update_result_uptodate_ahead, current, version))
 
     // 仓库还没发过 Release：正常状态，不是故障，所以 ok=true（走中性配色）
-    UpdateChecker.Result.NoRelease -> UpdateState.Done("仓库还没有发布过 Release")
+    UpdateChecker.Result.NoRelease ->
+      UpdateState.Done(ctx.getString(R.string.update_result_no_release))
 
-    is UpdateChecker.Result.Failed -> UpdateState.Done("检查失败：$reason", ok = false)
+    is UpdateChecker.Result.Failed ->
+      UpdateState.Done(ctx.getString(R.string.update_result_failed, reason), ok = false)
   }
 
 /**
@@ -671,9 +652,16 @@ private fun UpdateCard(
       }
 
       Spacer(modifier = Modifier.height(16.dp))
+      val url = done?.url
       Row(verticalAlignment = Alignment.CenterVertically) {
         val checking = state is UpdateState.Checking
-        Button(onClick = onCheck, enabled = !checking) {
+        // 单按钮时填满（与 AboutCard 一致）；有「打开发布页」时主按钮按 weight 占满剩余宽度。
+        Button(
+          onClick = onCheck,
+          enabled = !checking,
+          modifier =
+            if (url == null) Modifier.fillMaxWidth() else Modifier.weight(1f),
+        ) {
           if (checking) {
             CircularProgressIndicator(
               modifier = Modifier.size(16.dp),
@@ -688,7 +676,6 @@ private fun UpdateCard(
               else stringResource(R.string.update_title)
           )
         }
-        val url = done?.url
         if (url != null) {
           Spacer(modifier = Modifier.width(10.dp))
           OutlinedButton(onClick = { onOpenPage(url) }) {
