@@ -614,6 +614,9 @@ private fun UpdateChecker.Result.toState(current: String): UpdateState =
       if (version == current) UpdateState.Done("已是最新版本（$current）")
       else UpdateState.Done("已是最新（本地 $current 比已发布的 $version 还新）")
 
+    // 仓库还没发过 Release：正常状态，不是故障，所以 ok=true（走中性配色）
+    UpdateChecker.Result.NoRelease -> UpdateState.Done("仓库还没有发布过 Release")
+
     is UpdateChecker.Result.Failed -> UpdateState.Done("检查失败：$reason", ok = false)
   }
 

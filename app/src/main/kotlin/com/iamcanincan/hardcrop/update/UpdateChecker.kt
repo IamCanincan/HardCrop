@@ -61,6 +61,14 @@ object UpdateChecker {
      */
     data class UpToDate(val version: String) : Result
 
+    /**
+     * 仓库还没发布过任何 Release（GitHub 返回 404）。
+     *
+     * 这是**正常状态**而不是故障 —— 单独成一类，免得界面把它渲染成红色的
+     * 「检查失败」，让人以为是网络或代码出了问题。
+     */
+    data object NoRelease : Result
+
     data class Failed(val reason: String) : Result
   }
 
@@ -75,7 +83,8 @@ object UpdateChecker {
   fun check(currentVersion: String): Result {
     var firstFailure: Result.Failed? = null
     for (endpoint in ENDPOINTS) {
-      when (val result = request(endpoint, currentVersion)) {
+      val result = request(endpoint, currentVersion)
+      when (result) {
         is Result.Failed -> if (firstFailure == null) firstFailure = result
         else -> return result
       }
@@ -95,7 +104,7 @@ object UpdateChecker {
     try {
       when (val code = connection.responseCode) {
         HttpURLConnection.HTTP_OK -> evaluate(connection, currentVersion)
-        404 -> Result.Failed("仓库还没有发布过 Release")
+        404 -> Result.NoRelease
         403 -> Result.Failed("请求被 GitHub 限流了，过一会儿再试")
         else -> Result.Failed("GitHub 返回 HTTP $code")
       }
