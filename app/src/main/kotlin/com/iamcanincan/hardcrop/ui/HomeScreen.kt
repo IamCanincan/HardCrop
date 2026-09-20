@@ -1,0 +1,568 @@
+package com.iamcanincan.hardcrop.ui
+
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
+import androidx.compose.material.icons.filled.Android
+import androidx.compose.material.icons.filled.Apps
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Dashboard
+import androidx.compose.material.icons.filled.FormatListNumbered
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Lightbulb
+import androidx.compose.material.icons.filled.Power
+import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Terminal
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ElevatedCard
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.unit.dp
+import com.iamcanincan.hardcrop.R
+import kotlinx.coroutines.launch
+
+private const val REPO_URL = "https://github.com/IamCanincan/HardCrop"
+
+@Composable
+fun HomeScreen() {
+  val snackbarHostState = remember { SnackbarHostState() }
+
+  Scaffold(snackbarHost = { SnackbarHost(snackbarHostState) }) { innerPadding ->
+    LazyColumn(
+      modifier = Modifier.fillMaxSize().padding(innerPadding),
+      contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+      verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+      item { HeroHeader() }
+      item { StatusCard() }
+
+      item { SectionLabel(text = stringResource(R.string.section_scope)) }
+      item { ScopeGroup() }
+
+      item { SectionLabel(text = stringResource(R.string.section_steps)) }
+      item { StepsCard() }
+
+      item { SectionLabel(text = stringResource(R.string.section_verify)) }
+      item { VerifyCard(snackbarHostState) }
+
+      item { SectionLabel(text = stringResource(R.string.section_notes)) }
+      item { NotesCard() }
+
+      item { SectionLabel(text = stringResource(R.string.section_about)) }
+      item { AboutCard() }
+
+      item { Spacer(modifier = Modifier.height(8.dp)) }
+    }
+  }
+}
+
+/** 顶栏：App 图标 + 名称 + 一句话说明（与 Noticon 的头部布局同型）。 */
+@Composable
+private fun HeroHeader() {
+  Row(
+    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+    verticalAlignment = Alignment.CenterVertically,
+  ) {
+    AppIconBadge()
+    Spacer(modifier = Modifier.width(14.dp))
+    Column(modifier = Modifier.weight(1f)) {
+      Text(
+        text = stringResource(R.string.appName),
+        style = MaterialTheme.typography.titleLarge,
+        color = MaterialTheme.colorScheme.onSurface,
+      )
+      Text(
+        text = stringResource(R.string.hero_subtitle),
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+      )
+    }
+  }
+}
+
+/**
+ * 头部那个圆形 App 图标。用 primaryContainer 做底、onPrimaryContainer 画内容，
+ * 深浅色模式下都能保持对比度，且不引入任何位图资源。
+ */
+@Composable
+private fun AppIconBadge() {
+  Surface(
+    shape = RoundedCornerShape(16.dp),
+    color = MaterialTheme.colorScheme.primaryContainer,
+    modifier = Modifier.size(52.dp),
+  ) {
+    Box(contentAlignment = Alignment.Center) {
+      Text(
+        text = "HC",
+        style = MaterialTheme.typography.titleMedium,
+        color = MaterialTheme.colorScheme.onPrimaryContainer,
+      )
+    }
+  }
+}
+
+/**
+ * 状态卡。模块本身是后台模块，没有 API 能读自己在 LSPosed 里的启用状态，
+ * 所以这里只说明"去哪里确认"，不假装能显示开关状态。
+ */
+@Composable
+private fun StatusCard() {
+  Card(
+    colors =
+      CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
+    shape = MaterialTheme.shapes.large,
+  ) {
+    Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+      Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.onSecondaryContainer,
+        modifier = Modifier.size(40.dp),
+      ) {
+        Box(contentAlignment = Alignment.Center) {
+          Icon(
+            imageVector = Icons.Default.Power,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.secondaryContainer,
+            modifier = Modifier.size(22.dp),
+          )
+        }
+      }
+      Spacer(modifier = Modifier.width(14.dp))
+      Column(modifier = Modifier.weight(1f)) {
+        Text(
+          text = stringResource(R.string.status_title),
+          style = MaterialTheme.typography.titleSmall,
+          color = MaterialTheme.colorScheme.onSecondaryContainer,
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+          text = stringResource(R.string.status_body),
+          style = MaterialTheme.typography.bodySmall,
+          color = MaterialTheme.colorScheme.onSecondaryContainer,
+        )
+      }
+    }
+  }
+}
+
+/** 分组小标题（Noticon 风格：小字、次要色、带左内边距）。 */
+@Composable
+private fun SectionLabel(text: String) {
+  Text(
+    text = text,
+    style = MaterialTheme.typography.labelLarge,
+    color = MaterialTheme.colorScheme.onSurfaceVariant,
+    modifier = Modifier.padding(start = 4.dp),
+  )
+}
+
+/** 作用域清单：一张卡片里 6 行，每行 = 图标方块 + 标题 + 描述 + 标签。 */
+@Composable
+private fun ScopeGroup() {
+  val scopes =
+    listOf(
+      ScopeItem(
+        Icons.Default.Android,
+        R.string.scope_system_title,
+        R.string.scope_system_desc,
+        ScopeTag.RECOMMENDED,
+      ),
+      ScopeItem(
+        Icons.Default.Apps,
+        R.string.scope_launcher_title,
+        R.string.scope_launcher_desc,
+        ScopeTag.REQUIRED,
+      ),
+      ScopeItem(
+        Icons.Default.Dashboard,
+        R.string.scope_systemui_title,
+        R.string.scope_systemui_desc,
+        ScopeTag.RECOMMENDED,
+      ),
+      ScopeItem(
+        Icons.Default.Settings,
+        R.string.scope_settings_title,
+        R.string.scope_settings_desc,
+        ScopeTag.RECOMMENDED,
+      ),
+      ScopeItem(
+        Icons.Default.Share,
+        R.string.scope_intentresolver_title,
+        R.string.scope_intentresolver_desc,
+        ScopeTag.OPTIONAL,
+      ),
+      ScopeItem(
+        Icons.Default.Security,
+        R.string.scope_permissioncontroller_title,
+        R.string.scope_permissioncontroller_desc,
+        ScopeTag.OPTIONAL,
+      ),
+    )
+
+  ElevatedCard(shape = MaterialTheme.shapes.large) {
+    Column {
+      Text(
+        text = stringResource(R.string.scope_hint),
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+      )
+      HorizontalDivider()
+      scopes.forEachIndexed { index, item ->
+        if (index > 0) HorizontalDivider()
+        ScopeRow(item)
+      }
+    }
+  }
+}
+
+/**
+ * 作用域的档位。多个作用域共享同一档位 —— 每种标签只在 strings.xml 里定义一次，
+ * 不重复（否则 lint 的 DuplicateStrings 会报）。
+ */
+private enum class ScopeTag(val labelRes: Int, val highlighted: Boolean) {
+  REQUIRED(R.string.scope_tag_required, highlighted = true),
+  RECOMMENDED(R.string.scope_tag_recommended, highlighted = false),
+  OPTIONAL(R.string.scope_tag_optional, highlighted = false),
+}
+
+private data class ScopeItem(
+  val icon: ImageVector,
+  val titleRes: Int,
+  val descRes: Int,
+  val tag: ScopeTag,
+)
+
+@Composable
+private fun ScopeRow(item: ScopeItem) {
+  Row(
+    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+    verticalAlignment = Alignment.CenterVertically,
+  ) {
+    IconBadge(
+      icon = item.icon,
+      // "必选"用主色底强调，其余用中性 surface 底
+      containerColor =
+        if (item.tag.highlighted) MaterialTheme.colorScheme.primary
+        else MaterialTheme.colorScheme.surfaceContainerHighest,
+      contentColor =
+        if (item.tag.highlighted) MaterialTheme.colorScheme.onPrimary
+        else MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    Spacer(modifier = Modifier.width(14.dp))
+    Column(modifier = Modifier.weight(1f)) {
+      Text(
+        text = stringResource(item.titleRes),
+        style = MaterialTheme.typography.bodyLarge,
+        color = MaterialTheme.colorScheme.onSurface,
+      )
+      Spacer(modifier = Modifier.height(2.dp))
+      Text(
+        text = stringResource(item.descRes),
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+      )
+    }
+    Spacer(modifier = Modifier.width(8.dp))
+    Surface(
+      shape = MaterialTheme.shapes.extraSmall,
+      color =
+        if (item.tag.highlighted) MaterialTheme.colorScheme.primaryContainer
+        else MaterialTheme.colorScheme.surfaceContainerHighest,
+    ) {
+      Text(
+        text = stringResource(item.tag.labelRes),
+        style = MaterialTheme.typography.labelSmall,
+        color =
+          if (item.tag.highlighted) MaterialTheme.colorScheme.onPrimaryContainer
+          else MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+      )
+    }
+  }
+}
+
+/** 卡片左侧的图标方块：圆角方块 + 居中图标。 */
+@Composable
+private fun IconBadge(
+  icon: ImageVector,
+  containerColor: androidx.compose.ui.graphics.Color,
+  contentColor: androidx.compose.ui.graphics.Color,
+) {
+  Surface(shape = RoundedCornerShape(12.dp), color = containerColor, modifier = Modifier.size(40.dp)) {
+    Box(contentAlignment = Alignment.Center) {
+      Icon(
+        imageVector = icon,
+        contentDescription = null,
+        tint = contentColor,
+        modifier = Modifier.size(22.dp),
+      )
+    }
+  }
+}
+
+/** 启用步骤：标题行 + 4 个步骤（序号 + 主文案 + 小字提示）。 */
+@Composable
+private fun StepsCard() {
+  val steps =
+    listOf(
+      R.string.step_1 to R.string.step_1_hint,
+      R.string.step_2 to R.string.step_2_hint,
+      R.string.step_3 to R.string.step_3_hint,
+      R.string.step_4 to R.string.step_4_hint,
+    )
+
+  ElevatedCard(shape = MaterialTheme.shapes.large) {
+    Column {
+      Row(
+        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+      ) {
+        Icon(
+          imageVector = Icons.Default.FormatListNumbered,
+          contentDescription = null,
+          tint = MaterialTheme.colorScheme.primary,
+          modifier = Modifier.size(20.dp),
+        )
+        Spacer(modifier = Modifier.width(12.dp))
+        Text(
+          text = stringResource(R.string.section_steps),
+          style = MaterialTheme.typography.titleSmall,
+          color = MaterialTheme.colorScheme.onSurface,
+        )
+      }
+      HorizontalDivider()
+      steps.forEachIndexed { index, (titleRes, hintRes) ->
+        if (index > 0) HorizontalDivider()
+        Row(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+          Surface(
+            shape = MaterialTheme.shapes.extraSmall,
+            color = MaterialTheme.colorScheme.surfaceContainerHighest,
+            modifier = Modifier.size(28.dp),
+          ) {
+            Box(contentAlignment = Alignment.Center) {
+              Text(
+                text = "${index + 1}",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+              )
+            }
+          }
+          Spacer(modifier = Modifier.width(12.dp))
+          Column(modifier = Modifier.weight(1f)) {
+            Text(
+              text = stringResource(titleRes),
+              style = MaterialTheme.typography.bodyMedium,
+              color = MaterialTheme.colorScheme.onSurface,
+            )
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+              text = stringResource(hintRes),
+              style = MaterialTheme.typography.bodySmall,
+              color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+          }
+        }
+      }
+    }
+  }
+}
+
+/** 验证卡：等宽字体的 logcat 命令 + 一键复制。 */
+@Composable
+private fun VerifyCard(snackbarHostState: SnackbarHostState) {
+  val command = stringResource(R.string.verify_logcat)
+  val copiedMessage = stringResource(R.string.verify_copied)
+  val clipboard = LocalClipboardManager.current
+  val scope = rememberCoroutineScope()
+
+  ElevatedCard(shape = MaterialTheme.shapes.large) {
+    Column(modifier = Modifier.padding(16.dp)) {
+      Row(verticalAlignment = Alignment.CenterVertically) {
+        Icon(
+          imageVector = Icons.Default.Terminal,
+          contentDescription = null,
+          tint = MaterialTheme.colorScheme.primary,
+          modifier = Modifier.size(20.dp),
+        )
+        Spacer(modifier = Modifier.width(12.dp))
+        Text(
+          text = stringResource(R.string.section_verify),
+          style = MaterialTheme.typography.titleSmall,
+          modifier = Modifier.weight(1f),
+        )
+      }
+      Spacer(modifier = Modifier.height(8.dp))
+      Text(
+        text = stringResource(R.string.verify_body),
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+      )
+      Spacer(modifier = Modifier.height(12.dp))
+      Surface(
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+      ) {
+        Row(
+          modifier = Modifier.fillMaxWidth().padding(start = 14.dp, top = 10.dp, bottom = 10.dp),
+          verticalAlignment = Alignment.CenterVertically,
+        ) {
+          Text(
+            text = command,
+            style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.weight(1f),
+          )
+          IconButton(
+            onClick = {
+              clipboard.setText(AnnotatedString(command))
+              scope.launch { snackbarHostState.showSnackbar(copiedMessage) }
+            }
+          ) {
+            Icon(
+              imageVector = Icons.Default.ContentCopy,
+              contentDescription = stringResource(R.string.verify_copy),
+              tint = MaterialTheme.colorScheme.onSurfaceVariant,
+              modifier = Modifier.size(20.dp),
+            )
+          }
+        }
+      }
+    }
+  }
+}
+
+/** 说明要点：带圆点的列表。 */
+@Composable
+private fun NotesCard() {
+  val notes =
+    listOf(
+      R.string.note_adaptive,
+      R.string.note_tiles,
+      R.string.note_boot,
+      R.string.note_launcher3,
+      R.string.note_themed_icon,
+    )
+
+  ElevatedCard(shape = MaterialTheme.shapes.large) {
+    Column(modifier = Modifier.padding(16.dp)) {
+      Row(verticalAlignment = Alignment.CenterVertically) {
+        Icon(
+          imageVector = Icons.Default.Lightbulb,
+          contentDescription = null,
+          tint = MaterialTheme.colorScheme.primary,
+          modifier = Modifier.size(20.dp),
+        )
+        Spacer(modifier = Modifier.width(12.dp))
+        Text(
+          text = stringResource(R.string.section_notes),
+          style = MaterialTheme.typography.titleSmall,
+        )
+      }
+      Spacer(modifier = Modifier.height(8.dp))
+      notes.forEach { res ->
+        Row(modifier = Modifier.padding(vertical = 6.dp)) {
+          Text(
+            text = "•",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.width(16.dp),
+          )
+          Text(
+            text = stringResource(res),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(1f),
+          )
+        }
+      }
+    }
+  }
+}
+
+/** 关于：版本/许可 + 跳转 GitHub 的按钮。 */
+@Composable
+private fun AboutCard() {
+  val uriHandler = LocalUriHandler.current
+
+  ElevatedCard(shape = MaterialTheme.shapes.large) {
+    Column(modifier = Modifier.padding(16.dp)) {
+      Row(verticalAlignment = Alignment.CenterVertically) {
+        IconBadge(
+          icon = Icons.Default.Info,
+          containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+          contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(modifier = Modifier.width(14.dp))
+        Column(modifier = Modifier.weight(1f)) {
+          Text(
+            text = stringResource(R.string.about_version),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+          )
+          Spacer(modifier = Modifier.height(2.dp))
+          Text(
+            text = stringResource(R.string.about_body),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+          )
+        }
+      }
+      Spacer(modifier = Modifier.height(12.dp))
+      Button(
+        onClick = { uriHandler.openUri(REPO_URL) },
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.large,
+        colors =
+          ButtonDefaults.buttonColors(
+            containerColor = MaterialTheme.colorScheme.primary,
+            contentColor = MaterialTheme.colorScheme.onPrimary,
+          ),
+      ) {
+        Icon(
+          imageVector = Icons.AutoMirrored.Filled.OpenInNew,
+          contentDescription = null,
+          modifier = Modifier.size(18.dp),
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        Text(text = stringResource(R.string.about_repo))
+      }
+    }
+  }
+}

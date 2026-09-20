@@ -1,4 +1,4 @@
-package com.hardcrop
+package com.iamcanincan.hardcrop
 
 import android.graphics.Canvas
 import android.graphics.Color

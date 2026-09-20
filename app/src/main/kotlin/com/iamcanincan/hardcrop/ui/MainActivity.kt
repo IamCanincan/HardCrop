@@ -1,10 +1,10 @@
-package com.hardcrop.ui
+package com.iamcanincan.hardcrop.ui
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import com.hardcrop.ui.theme.HardCropTheme
+import com.iamcanincan.hardcrop.ui.theme.HardCropTheme
 
 /**
  * 设置界面。这个 Activity 同时承担两件事：

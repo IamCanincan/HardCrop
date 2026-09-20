@@ -13,6 +13,9 @@ compose-ui-graphics = { module = "androidx.compose.ui:ui-graphics" }
 compose-ui-tooling = { module = "androidx.compose.ui:ui-tooling" }
 compose-ui-tooling-preview = { module = "androidx.compose.ui:ui-tooling-preview" }
 compose-material3 = { module = "androidx.compose.material3:material3" }
+# Material Icons Extended：作用域/状态/验证等卡片左侧的小图标（Power、Android、Layers 等）
+# 标准 material-icons 没有这些语义图标；extended 多 ~7k 个图标，仅 ~20KB gzip 增量。
+compose-material-icons-extended = { module = "androidx.compose.material:material-icons-extended" }
 activity-compose = { module = "androidx.activity:activity-compose", version.ref = "activityCompose" }
 # MaterialShapes：Material 3 Expressive 的形状系统（连续圆角多边形，如花瓣/曲奇）
 graphics-shapes = { module = "androidx.graphics:graphics-shapes", version = "1.1.0" }

@@ -1,4 +1,4 @@
-package com.hardcrop
+package com.iamcanincan.hardcrop
 
 import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface

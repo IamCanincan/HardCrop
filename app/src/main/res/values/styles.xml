@@ -1,11 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!--
-        Compose 界面自己用 MaterialTheme 控制全部颜色，这里的 Activity 主题只负责
-        "不要系统 ActionBar"（Compose 自己画 TopAppBar）+ 让窗口背景透明，
-        避免深浅色模式下窗口底色和 Compose 内容对不上。
+        Compose 界面自己用 MaterialTheme 控制全部颜色，这里的 Activity 主题只负责两件事：
+        1. 不要系统 ActionBar（Compose 自己画顶栏）；
+        2. 让窗口背景透明，避免深浅色模式下窗口底色和 Compose 内容对不上。
+
+        注意不要写成 Theme.Material.Light.NoActionBar：那个变体把窗口/状态栏固定在
+        浅色语义上，深色模式下状态栏图标会变成深色、看不清。不带 Light 后缀的
+        Theme.Material 会跟随系统夜间模式。
     -->
-    <style name="Theme.HardCrop" parent="android:Theme.Material.Light.NoActionBar">
+    <style name="Theme.HardCrop" parent="android:Theme.Material.NoActionBar">
         <item name="android:windowBackground">@android:color/transparent</item>
     </style>
 </resources>

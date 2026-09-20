@@ -2,45 +2,70 @@
 <resources>
     <string name="appName">HardCrop</string>
 
-    <!-- 设置界面 -->
-    <string name="hero_title">非自适应图标，强制裁圆</string>
-    <string name="hero_body">只做一件事：把没有自适应图标的应用图标裁成圆形，圆外透明、内容不缩小，
-        和真正的自适应图标看起来一致。</string>
+    <!-- Hero 顶栏 -->
+    <string name="hero_subtitle">未配圆形形状的应用图标，强制裁圆</string>
 
-    <string name="scope_title">需要勾选的作用域</string>
+    <!-- 状态卡 -->
+    <string name="status_title">模块启用状态</string>
+    <string name="status_body">模块在 LSPosed 中是否启用、作用域是否生效，请到 LSPosed 中确认。本界面只列出作用域清单和启用步骤。</string>
+
+    <!-- 作用域分组 -->
+    <string name="section_scope">作用域</string>
     <string name="scope_hint">模块在这些进程里替换图标的加载结果，漏掉的进程会拿到无法解析的资源 id。</string>
-    <string name="scope_system">android（system_server）</string>
+
+    <!-- 作用域标签（3 种，多个作用域共享同一档位）-->
+    <string name="scope_tag_required">必选</string>
+    <string name="scope_tag_recommended">推荐</string>
+    <string name="scope_tag_optional">可选</string>
+
+    <!-- 6 个作用域（标题 + 描述 + 标签档位）-->
+    <string name="scope_system_title">android（system_server）</string>
     <string name="scope_system_desc">系统服务，解析应用信息</string>
-    <string name="scope_launcher">com.android.launcher3</string>
+
+    <string name="scope_launcher_title">com.android.launcher3</string>
     <string name="scope_launcher_desc">桌面与应用抽屉（效果最直观）</string>
-    <string name="scope_systemui">com.android.systemui</string>
+
+    <string name="scope_systemui_title">com.android.systemui</string>
     <string name="scope_systemui_desc">状态栏与最近任务</string>
-    <string name="scope_settings">com.android.settings</string>
+
+    <string name="scope_settings_title">com.android.settings</string>
     <string name="scope_settings_desc">设置里的应用列表</string>
-    <string name="scope_intentresolver">com.android.intentresolver</string>
+
+    <string name="scope_intentresolver_title">com.android.intentresolver</string>
     <string name="scope_intentresolver_desc">分享与打开方式的选择列表</string>
-    <string name="scope_permissioncontroller">com.android.permissioncontroller</string>
+
+    <string name="scope_permissioncontroller_title">com.android.permissioncontroller</string>
     <string name="scope_permissioncontroller_desc">权限弹窗里的应用图标</string>
 
-    <string name="steps_title">启用步骤</string>
-    <string name="step_1">在 LSPosed 里启用本模块</string>
-    <string name="step_2">按上面的清单勾选作用域</string>
-    <string name="step_3">重启设备（框架不会热加载模块）</string>
-    <string name="step_4">重启后若桌面仍无变化，强制停止一次桌面进程再打开</string>
+    <!-- 启用步骤 -->
+    <string name="section_steps">启用步骤</string>
+    <string name="step_1">在 LSPosed 中启用本模块</string>
+    <string name="step_1_hint">在 LSPosed 管理器里把模块开关打开。</string>
+    <string name="step_2">按上方清单勾选要生效的进程</string>
+    <string name="step_2_hint">至少勾选 com.android.launcher3 才能在桌面看到效果。</string>
+    <string name="step_3">重启设备</string>
+    <string name="step_3_hint">框架不会热加载模块，必须重启。</string>
+    <string name="step_4">桌面无变化时，强制停止桌面再打开</string>
+    <string name="step_4_hint">刚开机时 daemon 启动晚于 launcher3，进程可能未被注入。</string>
 
-    <string name="notes_title">说明</string>
+    <!-- 验证 -->
+    <string name="section_verify">验证是否生效</string>
+    <string name="verify_body">执行下面的命令。看到 onPackageReady 与 Hooked 就说明模块已注入该进程。</string>
+    <string name="verify_logcat">adb logcat -s HardCrop</string>
+    <string name="verify_copy">复制命令</string>
+    <string name="verify_copied">已复制到剪贴板</string>
+
+    <!-- 说明 -->
+    <string name="section_notes">说明</string>
     <string name="note_adaptive">已经是自适应图标的应用不会被改动。</string>
     <string name="note_tiles">快捷设置磁贴画的是单色小图形，被排除在外。</string>
-    <string name="note_boot">框架的守护进程比 system_server 启动晚，刚开机时早期进程可能没被注入。</string>
+    <string name="note_boot">框架守护进程启动晚于 system_server，刚开机时早期进程可能未注入。</string>
     <string name="note_launcher3">Android 16 及以上会关掉桌面自带的背景板，图标按原样铺满圆形。</string>
+    <string name="note_themed_icon">本 App 图标已提供 monochrome 层，在 Android 13+ 启动器的“主题图标”开关下会染成壁纸取色。</string>
 
-    <string name="verify_title">验证是否生效</string>
-    <string name="verify_body">执行 adb logcat -s HardCrop。看到 onPackageReady 与 Hooked 就说明模块已注入该进程；
-        桌面抽屉里的非自适应图标应当都变成圆形。</string>
-    <string name="verify_logcat">adb logcat -s HardCrop</string>
-
-    <string name="about_title">关于</string>
-    <string name="about_version">版本 1.0</string>
-    <string name="about_license">MIT 许可</string>
-    <string name="about_repo">在 GitHub 上查看源码</string>
+    <!-- 关于 -->
+    <string name="section_about">关于</string>
+    <string name="about_version">版本 1.0 · MIT 许可</string>
+    <string name="about_body">源码与说明在 GitHub；只做“非自适应图标 → 圆形裁切”这一件事。</string>
+    <string name="about_repo">在 GitHub 上查看</string>
 </resources>

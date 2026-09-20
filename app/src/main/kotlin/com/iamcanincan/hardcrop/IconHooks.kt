@@ -1,4 +1,4 @@
-package com.hardcrop
+package com.iamcanincan.hardcrop
 
 import android.Manifest
 import android.content.pm.ActivityInfo

@@ -8,13 +8,13 @@ plugins {
 }
 
 extensions.configure<ApplicationExtension> {
-  namespace = "com.hardcrop"
+  namespace = "com.iamcanincan.hardcrop"
   compileSdk = 37
 
   buildFeatures { compose = true }
 
   defaultConfig {
-    applicationId = "com.hardcrop"
+    applicationId = "com.iamcanincan.hardcrop"
     minSdk = 27
     targetSdk = 37
     versionCode = 1
@@ -61,6 +61,7 @@ dependencies {
   implementation(libs.compose.ui.graphics)
   implementation(libs.compose.ui.tooling.preview)
   implementation(libs.compose.material3)
+  implementation(libs.compose.material.icons.extended)
   implementation(libs.activity.compose)
   implementation(libs.graphics.shapes)
   debugImplementation(libs.compose.ui.tooling)
