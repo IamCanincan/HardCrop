@@ -7,6 +7,7 @@ import android.graphics.PixelFormat
 import android.graphics.drawable.AdaptiveIconDrawable
 import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.Drawable
+import android.os.Build
 
 /**
  * 把非自适应图标裁成圆形，并让 launcher 按自适应图标的方式处理它。
@@ -59,6 +60,36 @@ class CircleIconDrawable(icon: Drawable) :
 
       override fun getChangingConfigurations(): Int = changingConfigurations
     }
+  }
+
+  /**
+   * 自己用**系统 mask** 裁一次，保证任何「直接 draw() 这个 Drawable」的代码
+   * （不只是 `BaseIconFactory.createBadgedIconBitmap()`）也能看到裁切后的形状。
+   *
+   * 桌面图标的圆看起来是来自 launcher 的 `BaseIconFactory`，它会把 Drawable 转成
+   * Bitmap 并用系统 mask 裁切。但 **Launcher3 的 `FloatingIconView`**（点击桌面图标
+   * 那个放大浮起的动画）拿到 `newDrawable()` 的副本后是**直接 `draw()` 到 canvas**，
+   * 不走 `BaseIconFactory`，系统 mask 在那条路径上不会被应用 —— 上一版只有
+   * `super.draw(canvas)` 画出 background + foreground，结果就是未裁切的方形。
+   *
+   * 这里用**同一个**系统 mask 自己裁一次：跟 BaseIconFactory 那条路径用的 mask
+   * 完全相同，所以两条路径的结果一致 —— 重复裁切不会把圆角方形之类裁成内切圆。
+   *
+   * `iconMask`（`AdaptiveIconDrawable.getIconMask()`）是 API 33+ 才有的；之前的版本
+   * 没有 FloatingIconView 这条路径要担心，所以直接退回给 `super.draw()`。
+   */
+  override fun draw(canvas: Canvas) {
+    val mask =
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) iconMask
+      else null
+    if (mask == null || mask.isEmpty) {
+      super.draw(canvas)
+      return
+    }
+    canvas.save()
+    canvas.clipPath(mask)
+    super.draw(canvas)
+    canvas.restore()
   }
 }
 
