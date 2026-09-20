@@ -4,6 +4,21 @@
     <application
         android:icon="@mipmap/ic_launcher"
         android:label="@string/appName"
-        android:supportsRtl="true" />
+        android:supportsRtl="true">
+
+        <!--
+            这个 Activity 让模块有 MAIN + LAUNCHER 入口。
+            没有它模块就是纯后台的，桌面上不会出现图标（只能在系统设置的应用列表里看到）。
+        -->
+        <activity
+            android:name=".ui.MainActivity"
+            android:exported="true"
+            android:theme="@style/Theme.HardCrop">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
 
 </manifest>

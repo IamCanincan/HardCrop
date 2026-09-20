@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+        Compose 界面自己用 MaterialTheme 控制全部颜色，这里的 Activity 主题只负责
+        "不要系统 ActionBar"（Compose 自己画 TopAppBar）+ 让窗口背景透明，
+        避免深浅色模式下窗口底色和 Compose 内容对不上。
+    -->
+    <style name="Theme.HardCrop" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@android:color/transparent</item>
+    </style>
+</resources>

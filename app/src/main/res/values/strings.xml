@@ -1,4 +1,46 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="appName">HardCrop</string>
+
+    <!-- 设置界面 -->
+    <string name="hero_title">非自适应图标，强制裁圆</string>
+    <string name="hero_body">只做一件事：把没有自适应图标的应用图标裁成圆形，圆外透明、内容不缩小，
+        和真正的自适应图标看起来一致。</string>
+
+    <string name="scope_title">需要勾选的作用域</string>
+    <string name="scope_hint">模块在这些进程里替换图标的加载结果，漏掉的进程会拿到无法解析的资源 id。</string>
+    <string name="scope_system">android（system_server）</string>
+    <string name="scope_system_desc">系统服务，解析应用信息</string>
+    <string name="scope_launcher">com.android.launcher3</string>
+    <string name="scope_launcher_desc">桌面与应用抽屉（效果最直观）</string>
+    <string name="scope_systemui">com.android.systemui</string>
+    <string name="scope_systemui_desc">状态栏与最近任务</string>
+    <string name="scope_settings">com.android.settings</string>
+    <string name="scope_settings_desc">设置里的应用列表</string>
+    <string name="scope_intentresolver">com.android.intentresolver</string>
+    <string name="scope_intentresolver_desc">分享与打开方式的选择列表</string>
+    <string name="scope_permissioncontroller">com.android.permissioncontroller</string>
+    <string name="scope_permissioncontroller_desc">权限弹窗里的应用图标</string>
+
+    <string name="steps_title">启用步骤</string>
+    <string name="step_1">在 LSPosed 里启用本模块</string>
+    <string name="step_2">按上面的清单勾选作用域</string>
+    <string name="step_3">重启设备（框架不会热加载模块）</string>
+    <string name="step_4">重启后若桌面仍无变化，强制停止一次桌面进程再打开</string>
+
+    <string name="notes_title">说明</string>
+    <string name="note_adaptive">已经是自适应图标的应用不会被改动。</string>
+    <string name="note_tiles">快捷设置磁贴画的是单色小图形，被排除在外。</string>
+    <string name="note_boot">框架的守护进程比 system_server 启动晚，刚开机时早期进程可能没被注入。</string>
+    <string name="note_launcher3">Android 16 及以上会关掉桌面自带的背景板，图标按原样铺满圆形。</string>
+
+    <string name="verify_title">验证是否生效</string>
+    <string name="verify_body">执行 adb logcat -s HardCrop。看到 onPackageReady 与 Hooked 就说明模块已注入该进程；
+        桌面抽屉里的非自适应图标应当都变成圆形。</string>
+    <string name="verify_logcat">adb logcat -s HardCrop</string>
+
+    <string name="about_title">关于</string>
+    <string name="about_version">版本 1.0</string>
+    <string name="about_license">MIT 许可</string>
+    <string name="about_repo">在 GitHub 上查看源码</string>
 </resources>

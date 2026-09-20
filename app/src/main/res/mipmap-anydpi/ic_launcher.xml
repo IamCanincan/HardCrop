@@ -1,4 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+    自适应图标。<monochrome> 供 Android 13+ 的「主题图标」用（启动器按主题色给这一层染色）；
+    Android 8-12 的 AdaptiveIconDrawable 解析器不认识这个标签，会直接跳过它，
+    所以这里不需要再用 -v33 限定符拆一份。
+-->
 <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
     <background android:drawable="@drawable/ic_launcher_background" />
     <foreground android:drawable="@drawable/ic_launcher_foreground" />

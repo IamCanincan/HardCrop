@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<lint>
+    <!--
+        Compose 编译器插件的版本必须与 Kotlin Gradle 插件版本严格一致（本项目 Kotlin 是 2.2.10）。
+        lint 建议升级到 2.4.20，但那样会因为版本不匹配直接构建失败，所以这里显式忽略。
+    -->
+    <issue id="NewerVersionAvailable" severity="ignore" />
+
+    <!--
+        挂钩代码（CircleIconDrawable 等）刻意用原生 Drawable / Canvas API：
+        这些代码运行在被注入的进程里，少一个依赖就少一份风险；KTX 只是语法糖，
+        对这里的行为没有任何收益。
+    -->
+    <issue id="UseKtx" severity="ignore" />
+
+    <!--
+        模块没有界面可以反馈状态，logcat（adb logcat -s HardCrop）是用户确认"模块到底
+        有没有注入到目标进程"的**唯一**手段，所以 release 构建也必须保留这些日志，
+        不能按 lint 的建议把它包进 BuildConfig.DEBUG。
+    -->
+    <issue id="LogConditional" severity="ignore" />
+</lint>

@@ -1,14 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+    主题图标（Android 13+）剪影：系统用主题色覆盖填充色。
+    与 Noticon monochrome 同型 —— 只留字形、不要底板/圆盘，
+    否则主题色渲染后会变成实色盘遮住字（已踩）。
+-->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- 系统会用单色覆盖填充色，这里只给形状 -->
-    <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M54,30a24,24 0 1,1 0,48a24,24 0 1,1 0,-48" />
-    <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M46,46h16v16h-16z" />
+    <group android:pivotX="54" android:pivotY="54"
+           android:scaleX="1.0" android:scaleY="1.0">
+        <!-- H 合并为单一轮廓（见 foreground 同款说明） -->
+        <path android:fillColor="#FFFFFF"
+              android:pathData="M31.84 42.51H37.06V51.37H46.05V42.51H51.26V65.48H46.05V56.21H37.06V65.48H31.84Z" />
+        <path android:fillColor="#FFFFFF"
+              android:pathData="M66.96 66Q61.68 66 58.33 62.6Q54.99 59.21 54.99 53.96Q54.99 48.67 58.39 45.34Q61.79 42 66.92 42Q69.41 42 71.36 42.8Q73.31 43.6 74.28 44.53Q75.6 45.84 75.6 45.84Q75.6 45.84 73.75 47.7Q71.96 49.53 71.96 49.53Q71.96 49.53 71.13 48.67Q70.42 48.01 69.4 47.6Q68.38 47.2 67.01 47.2Q64.25 47.2 62.31 49.08Q60.37 50.96 60.37 53.95Q60.37 56.96 62.3 58.88Q64.22 60.8 67 60.8Q68.41 60.8 69.64 60.26Q70.87 59.72 71.42 59.17Q72.39 58.23 72.39 58.23Q72.39 58.23 74.28 60.03Q76.16 61.79 76.16 61.79Q76.16 61.79 74.93 63.09Q73.57 64.4 71.54 65.2Q69.51 66 66.96 66Z" />
+    </group>
 </vector>

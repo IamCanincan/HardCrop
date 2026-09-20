@@ -1,15 +1,42 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+    图标：与 Noticon 同型 —— 淡粉背景 + 大号黑字 "HC"。
+    字体：Google Sans Flex（可变字体）实例化为 wght=700 / opsz=18 / wdth=100。
+    同一份字体、同一组参数已在 Noticon 的 Ni 上验证（_icon_gs_probe.py
+    反向复现 Ni 的 N/i bbox 完全一致）—— 保证两个 App 字形同一气质。
+    HC 宽高比 1.846（Ni 是 1.236），同样缩放下角点会更大；
+    Noticon Ni 用 group scale 1.2，HC 用 1.00 —— 角点距圆心 25.20
+    vs Ni 的 22.89，HC 视觉重量与 Ni 相当。
+
+    H: glyph=H bbox=(155, 0, 1365, 1432) advance=1521
+    C: glyph=C bbox=(77, -32, 1397, 1464) advance=1434
+    排版（视口 108，居中到 54,54）：
+      字符包围盒 x 31.84..76.21（宽 44.31）y 42.00..66.00（高 24.00）
+      字符宽度 / 图标宽 = 41.0%
+      角点距圆心 25.20 ≤ 33 安全圈 ✓
+
+    ⚠ H 的字形轮廓被 fontTools 拆成了【3 个互相重叠的矩形】
+      （左竖杆 / 右竖杆 / 横杆，横杆两端伸进竖杆里），
+      在 even-odd 填充下重叠处会变成洞 —— 竖杆在横杆那一段被挖窄。
+      Android <path> 默认 fillType=nonZero 不会出这个洞，
+      但为了让任何填充规则、任何渲染器都安全，这里改成【单一合并轮廓】：
+      M31.84 42.51H37.06V51.37H46.05V42.51H51.26V65.48H46.05V56.21H37.06V65.48H31.84Z
+      已在 480px 下做过像素比对：与原版 nonZero 结果 0 差异。
+      C 是单一闭合轮廓、无自重叠，两种规则下本来就一致，保持原样。
+-->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- The circle every icon is clipped to -->
-    <path
-        android:fillColor="#3F6FE4"
-        android:pathData="M54,30a24,24 0 1,1 0,48a24,24 0 1,1 0,-48" />
-    <!-- A square icon, its corners cut away by the circle -->
-    <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M46,46h16v16h-16z" />
+
+    <!-- 黑色 "HC"（100% 缩放；占图标宽 41.0%） -->
+    <group android:pivotX="54" android:pivotY="54"
+           android:scaleX="1.0" android:scaleY="1.0">
+        <!-- H 合并为单一轮廓（见文件头说明：避免重叠处在不同填充规则下不一致） -->
+        <path android:fillColor="#031019"
+              android:pathData="M31.84 42.51H37.06V51.37H46.05V42.51H51.26V65.48H46.05V56.21H37.06V65.48H31.84Z" />
+        <path android:fillColor="#031019"
+              android:pathData="M66.96 66Q61.68 66 58.33 62.6Q54.99 59.21 54.99 53.96Q54.99 48.67 58.39 45.34Q61.79 42 66.92 42Q69.41 42 71.36 42.8Q73.31 43.6 74.28 44.53Q75.6 45.84 75.6 45.84Q75.6 45.84 73.75 47.7Q71.96 49.53 71.96 49.53Q71.96 49.53 71.13 48.67Q70.42 48.01 69.4 47.6Q68.38 47.2 67.01 47.2Q64.25 47.2 62.31 49.08Q60.37 50.96 60.37 53.95Q60.37 56.96 62.3 58.88Q64.22 60.8 67 60.8Q68.41 60.8 69.64 60.26Q70.87 59.72 71.42 59.17Q72.39 58.23 72.39 58.23Q72.39 58.23 74.28 60.03Q76.16 61.79 76.16 61.79Q76.16 61.79 74.93 63.09Q73.57 64.4 71.54 65.2Q69.51 66 66.96 66Z" />
+    </group>
 </vector>

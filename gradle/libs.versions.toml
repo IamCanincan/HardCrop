@@ -1,5 +1,23 @@
+[versions]
+kotlin = "2.2.10"
+composeBom = "2026.09.00"
+activityCompose = "1.13.0"
+
 [libraries]
 libxposed-api = { module = "io.github.libxposed:api", version = "102.0.0" }
 
+# UI：Material 3 Expressive（Compose）。各库版本统一交给 BOM 托管，避免互相打架。
+compose-bom = { module = "androidx.compose:compose-bom", version.ref = "composeBom" }
+compose-ui = { module = "androidx.compose.ui:ui" }
+compose-ui-graphics = { module = "androidx.compose.ui:ui-graphics" }
+compose-ui-tooling = { module = "androidx.compose.ui:ui-tooling" }
+compose-ui-tooling-preview = { module = "androidx.compose.ui:ui-tooling-preview" }
+compose-material3 = { module = "androidx.compose.material3:material3" }
+activity-compose = { module = "androidx.activity:activity-compose", version.ref = "activityCompose" }
+# MaterialShapes：Material 3 Expressive 的形状系统（连续圆角多边形，如花瓣/曲奇）
+graphics-shapes = { module = "androidx.graphics:graphics-shapes", version = "1.1.0" }
+
 [plugins]
 android-application = { id = "com.android.application", version = "9.4.1" }
+# Compose 编译器插件版本必须与 Kotlin Gradle 插件版本严格一致（当前 Kotlin 是 2.2.10）
+kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }

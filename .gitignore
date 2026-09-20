@@ -14,3 +14,6 @@ app/build
 app/release
 *.apk
 *.idsig
+# 图标轮廓抽取/渲染验证用的本地脚本与预览图（_icon_hc.py 等），不进仓库
+/_*.py
+/_*.png

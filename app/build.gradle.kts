@@ -2,11 +2,16 @@ import com.android.build.api.dsl.ApplicationExtension
 import org.gradle.kotlin.dsl.configure
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
-plugins { alias(libs.plugins.android.application) }
+plugins {
+  alias(libs.plugins.android.application)
+  alias(libs.plugins.kotlin.compose)
+}
 
 extensions.configure<ApplicationExtension> {
   namespace = "com.hardcrop"
   compileSdk = 37
+
+  buildFeatures { compose = true }
 
   defaultConfig {
     applicationId = "com.hardcrop"
@@ -35,8 +40,28 @@ extensions.configure<ApplicationExtension> {
     includeInApk = false
     includeInBundle = false
   }
+
+  lint {
+    // 见 app/lint.xml：项目要求 0 warning，被显式忽略的两条都在文件里写了原因。
+    lintConfig = file("lint.xml")
+    abortOnError = true
+    checkAllWarnings = true
+  }
 }
 
 kotlin { compilerOptions { jvmTarget = JvmTarget.JVM_17 } }
 
-dependencies { compileOnly(libs.libxposed.api) }
+dependencies {
+  // 模块的挂钩逻辑：只在框架注入后运行，编译期不需要打进 APK。
+  compileOnly(libs.libxposed.api)
+
+  // 设置界面：Material 3 Expressive（Compose）。版本由 BOM 统一托管。
+  implementation(platform(libs.compose.bom))
+  implementation(libs.compose.ui)
+  implementation(libs.compose.ui.graphics)
+  implementation(libs.compose.ui.tooling.preview)
+  implementation(libs.compose.material3)
+  implementation(libs.activity.compose)
+  implementation(libs.graphics.shapes)
+  debugImplementation(libs.compose.ui.tooling)
+}
