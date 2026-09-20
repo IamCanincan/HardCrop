@@ -31,12 +31,15 @@
     <string name="scope_tag_recommended">推荐</string>
     <string name="scope_tag_optional">可选</string>
 
-    <!-- 6 个作用域（标题 + 描述 + 标签档位）-->
+    <!-- 7 个作用域（标题 + 描述 + 标签档位）-->
     <string name="scope_system_title">android（system_server）</string>
     <string name="scope_system_desc">系统服务，解析应用信息</string>
 
     <string name="scope_launcher_title">com.android.launcher3</string>
-    <string name="scope_launcher_desc">桌面与应用抽屉（效果最直观）</string>
+    <string name="scope_launcher_desc">桌面与应用抽屉（类原生 ROM，效果最直观）</string>
+
+    <string name="scope_launcher_pixel_title">com.google.android.apps.nexuslauncher</string>
+    <string name="scope_launcher_pixel_desc">桌面与应用抽屉（Pixel / Nexus 专用）</string>
 
     <string name="scope_systemui_title">com.android.systemui</string>
     <string name="scope_systemui_desc">状态栏与最近任务</string>

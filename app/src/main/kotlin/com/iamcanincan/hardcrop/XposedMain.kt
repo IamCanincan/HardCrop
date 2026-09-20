@@ -22,7 +22,7 @@ import io.github.libxposed.api.XposedModuleInterface
  * 写在里面的任何文字用户解包就能看到。字段说明一律放在本文件的 KDoc 或 README。
  *
  * ## 各字段的含义
- * - `staticScope=true`：作用域固定为 `scope.list` 里那 6 个进程，管理器拒绝勾选清单外的应用。
+ * - `staticScope=true`：作用域固定为 `scope.list` 里那 7 个进程，管理器拒绝勾选清单外的应用。
  *   模块只替换图标的加载结果，对没声明的进程没有任何作用，勾了只会误导。
  * - `autoHotReload=false`（框架默认值，显式写出来）：更新 APK 不会原地换 hook，
  *   改完代码必须重启目标进程。本模块 hook 的是 launcher / systemui 这类常驻进程，

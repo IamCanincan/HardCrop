@@ -20,6 +20,7 @@ import androidx.compose.material.icons.filled.Android
 import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Dashboard
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Power
 import androidx.compose.material.icons.filled.Security
@@ -243,7 +244,7 @@ private fun SectionLabel(text: String) {
   )
 }
 
-/** 作用域清单：一张卡片里 6 行，每行 = 图标方块 + 标题 + 描述 + 标签。 */
+/** 作用域清单：一张卡片里 7 行，每行 = 图标方块 + 标题 + 描述 + 标签。 */
 @Composable
 private fun ScopeGroup() {
   val scopes =
@@ -258,6 +259,12 @@ private fun ScopeGroup() {
         Icons.Default.Apps,
         R.string.scope_launcher_title,
         R.string.scope_launcher_desc,
+        ScopeTag.REQUIRED,
+      ),
+      ScopeItem(
+        Icons.Default.Home,
+        R.string.scope_launcher_pixel_title,
+        R.string.scope_launcher_pixel_desc,
         ScopeTag.REQUIRED,
       ),
       ScopeItem(
