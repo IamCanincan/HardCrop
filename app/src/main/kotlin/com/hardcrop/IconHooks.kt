@@ -54,9 +54,56 @@ fun hookIcons(xposed: XposedInterface, param: XposedModuleInterface.PackageReady
     Log.w(TAG, "No icon loader is found, nothing is hooked")
     return
   }
+  hookPixelLauncher(xposed, param)
   hookIconIds(xposed)
   hookShortcutIcons(xposed)
   Log.d(TAG, "Hooked ${param.packageName}")
+}
+
+/**
+ * Android 16+ (BAKLAVA) 的 Pixel / AOSP Launcher3 在 `BaseIconFactory.createBadgedIconBitmap`
+ * 里读取 `IconOptions.drawFullBleed`：true 时会**在 launcher 内部给图标再加一层白色背景板
+ * 并把内容缩到 safe zone**，false 时按图标原样画（full-bleed）。
+ *
+ * 我们已经把图标处理成"圆形、内容填满、圆外透明"——这时 launcher 再加白圆板 +
+ * safe-zone 缩小就会让用户看到"白圆 + 缩小"（即上一版模块的"白边"观感）。
+ * 把 `drawFullBleed` 设成 false 让 launcher 不再加它的背景板，我们的圆形就直接呈现在桌面。
+ *
+ * 旧 Android 版本没有这个开关，本 hook 自动 no-op。
+ */
+private fun hookPixelLauncher(
+  xposed: XposedInterface,
+  param: XposedModuleInterface.PackageReadyParam,
+) {
+  if (Build.VERSION.SDK_INT < Build.VERSION_CODES.BAKLAVA) return
+
+  val baseIconFactoryClass =
+    classOf("com.android.launcher3.icons.BaseIconFactory", param) ?: return
+  val iconOptionsClass =
+    classOf($$"com.android.launcher3.icons.BaseIconFactory$IconOptions", param) ?: return
+  val drawFullBleedField =
+    runCatching {
+        iconOptionsClass.getDeclaredField("drawFullBleed").apply { isAccessible = true }
+      }
+      .getOrNull() ?: return
+
+  var hooked = 0
+  for (method in
+    baseIconFactoryClass.declaredMethods.filter { it.name == "createBadgedIconBitmap" }) {
+    method.isAccessible = true
+    runCatching {
+      xposed.hook(method).intercept { chain ->
+        val args = chain.args
+        val iconOptions = args.getOrNull(1)
+        if (iconOptions != null && iconOptionsClass.isInstance(iconOptions)) {
+          drawFullBleedField.setBoolean(iconOptions, false)
+        }
+        chain.proceed(args.toTypedArray())
+      }
+      hooked++
+    }
+  }
+  if (hooked > 0) Log.d(TAG, "PixelLauncher: $hooked createBadgedIconBitmap hooked in ${param.packageName}")
 }
 
 private fun hookIconLoader(xposed: XposedInterface, method: Method): Boolean =

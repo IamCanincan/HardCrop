@@ -28,7 +28,8 @@ adb logcat -s HardCrop
 正常时每个作用域进程会打印：
 
 ```
-onPackageReady com.android.settings, sdk 37
+onPackageReady com.android.settings, sdk 36
+PixelLauncher: 2 createBadgedIconBitmap hooked in com.android.launcher3  （仅 launcher3 进程）
 Hooked com.android.settings
 ```
 
@@ -42,8 +43,12 @@ Hooked com.android.settings
    把图标资源 id 从 `0x7f……` 挪到 `0x6e……`（一个不会有真实资源的 package id）作为标记。
 2. 在 `Resources.getDrawableForDensity()`（以及新版本上的 `ApplicationPackageManager.getDrawableInternal()`）
    出口认出这个标记，换回原始 id 调用原方法拿到图标，再包成 `CircleIconDrawable` 返回。
-3. `CircleIconDrawable` 继承 `InsetDrawable`（inset 为 0），把原图标画进离屏位图，
-   用圆形路径以 `DST_IN` 裁掉圆外像素，最后把位图画回画布。
+3. `CircleIconDrawable` 继承 `AdaptiveIconDrawable`（bg/fg 用 `ColorDrawable(TRANSPARENT)`
+   占位，避免 launcher `setColorFilter` 等调用 NPE），重写 `draw` 把原图标按 1:1 绘到
+   离屏位图，用圆形路径以 `DST_IN` 裁掉圆外像素，再把位图画回画布。
+4. **Android 16+** 额外 hook `BaseIconFactory.createBadgedIconBitmap`（Pixel Launcher），
+   把 `IconOptions.drawFullBleed` 设成 `false`，让 launcher 不再加自己的白圆背景板。
+   旧版 Android 没有这个开关，hook 自动 no-op。
 
 ## API 102（libxposed）合规性
 
@@ -73,29 +78,20 @@ Hooked com.android.settings
 
 ## 关于 AOSP Launcher3（Pixel / Quickstep 自带桌面）
 
-**实测发现**：在 Android 12+ 的 AOSP Launcher3 上，launcher 会**对所有桌面图标**（包括自适应图标
-如 Chrome / Gmail / 系统应用等）**强制应用 launcher 自带的白圆背景板 + safe zone 缩小**——
-这是 launcher 自身的"统一图标形状"渲染流程，发生在 launcher 拿到 Drawable 之后，与模块无关。
+**Android 16+（BAKLAVA）的 Pixel Launcher 有一个隐藏开关 `IconOptions.drawFullBleed`**
+—— `BaseIconFactory.createBadgedIconBitmap` 用它决定要不要在 launcher 内部再给图标加一层
+白色背景板并把内容缩到 safe zone。本模块额外 hook 了 `createBadgedIconBitmap`，**把
+`drawFullBleed` 强制设成 `false`**：launcher 不再加自己的背景板，按图标原样画 full-bleed，
+我们的 `CircleIconDrawable`（圆形 + 内容填满、圆外透明）就直接呈现在桌面。
 
-直接验证方式：
-1. 禁用本模块（`/data/adb/lspd/cli modules disable com.hardcrop`），重启 launcher3，打开抽屉
-2. 启用本模块，重启 launcher3，打开抽屉
-3. 两张截图对比 —— 如果两张图看起来一模一样、且所有图标（包括自适应图标）都是"白圆 + 缩小"，
-   就说明白圆是 launcher 加的，不是模块加的。
+**怎么验证它生效**：日志里会出现 `PixelLauncher: 2 createBadgedIconBitmap hooked in
+com.android.launcher3`（launcher3 进程里有两个 `createBadgedIconBitmap` 重载被挂上）。
+之后看抽屉 —— **所有非自适应图标都会变成圆形 + 内容填满、圆外透明**，跟自适应图标观感一致。
 
-这就是说：
-- 在 AOSP Launcher3 上，**所有图标**看起来都是"白圆 + 缩小"，自适应图标也不例外；
-  本模块让非自适应图标**和自适应图标一模一样**地呈现。
-- 但用户常说的"和自适应图标一样"如果指的是 adaptive 图标**本身**那种"图标填满圆形、无白边"的观感，
-  **那在 AOSP Launcher3 上没有任何桌面图标能呈现**——AOSP launcher 给所有图标都加了同一块白圆板。
-
-要看到模块让"非自适应图标填满圆形、无白边"的真正效果，**换用第三方桌面**：
-Lawnchair / Nova Launcher / Action Launcher / Niagara / Smart Launcher / Microsoft Launcher 等
-不强制"统一图标形状"背景板的桌面都可以。在这些桌面上，模块的圆形裁切会原样生效，
-图标填满圆形、圆外透明，与自适应图标的视觉表现完全一致。
-
-如果坚持 AOSP Launcher3，可以试关闭系统的"Themed icons"（部分 OEM 在壁纸与样式里有开关）——
-但 AOSP Launcher3 的白圆板**仍会**显示，所以"无白边"仍然做不到。
+**旧版 Android（< 16）**：没有这个开关，本 hook 自动 no-op；模块只让 `CircleIconDrawable`
+作为圆形 drawable 返回，是否能看到"无白边"取决于桌面：AOSP Launcher3 上旧行为（白圆 +
+缩小）仍会出现；第三方桌面（Lawnchair / Nova / Niagara / Action / Smart / Microsoft）会按
+图标原样显示，圆形 + 无白边。
 
 ## 构建
 
