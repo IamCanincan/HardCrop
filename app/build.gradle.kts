@@ -11,7 +11,12 @@ extensions.configure<ApplicationExtension> {
   namespace = "com.iamcanincan.hardcrop"
   compileSdk = 37
 
-  buildFeatures { compose = true }
+  buildFeatures {
+    compose = true
+    // AGP 8+ 起默认不生成 BuildConfig；界面的"关于"与"检查更新"要读 VERSION_NAME，
+    // 与其在 strings.xml 里再抄一份版本号，不如让构建来生成唯一真相。
+    buildConfig = true
+  }
 
   defaultConfig {
     applicationId = "com.iamcanincan.hardcrop"

@@ -63,9 +63,19 @@
     <string name="note_launcher3">Android 16 及以上会关掉桌面自带的背景板，图标按原样铺满圆形。</string>
     <string name="note_themed_icon">本 App 图标已提供 monochrome 层，在 Android 13+ 启动器的“主题图标”开关下会染成壁纸取色。</string>
 
+    <!-- 更新卡片（与 Noticon 的 UpdateCard 同型；结果文案在代码里拼，见 UpdateCard）-->
+    <string name="section_update">更新</string>
+    <!-- 卡片标题和按钮都用这一句 -->
+    <string name="update_title">检查更新</string>
+    <string name="action_open_repo">在 GitHub 上查看</string>
+    <string name="update_current">当前版本 %1$s</string>
+    <string name="update_checking">检查中…</string>
+    <string name="update_go_download">打开发布页</string>
+    <string name="update_disclaimer">只有点下面的按钮才会联网：先直连 GitHub，连不上时走公共加速镜像。
+        这是本应用唯一的联网行为，没有统计也没有上报。</string>
+
     <!-- 关于 -->
     <string name="section_about">关于</string>
-    <string name="about_version">版本 1.0 · MIT 许可</string>
+    <string name="about_version">版本 %1$s · MIT 许可</string>
     <string name="about_body">源码与说明在 GitHub；只做“非自适应图标 → 圆形裁切”这一件事。</string>
-    <string name="about_repo">在 GitHub 上查看</string>
 </resources>

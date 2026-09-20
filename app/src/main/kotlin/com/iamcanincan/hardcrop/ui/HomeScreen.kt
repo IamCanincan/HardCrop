@@ -28,23 +28,30 @@ import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Terminal
+import androidx.compose.material.icons.filled.Update
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -54,14 +61,22 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
+import com.iamcanincan.hardcrop.BuildConfig
 import com.iamcanincan.hardcrop.R
+import com.iamcanincan.hardcrop.update.UpdateChecker
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 private const val REPO_URL = "https://github.com/IamCanincan/HardCrop"
 
 @Composable
 fun HomeScreen() {
   val snackbarHostState = remember { SnackbarHostState() }
+  val scope = rememberCoroutineScope()
+  val uriHandler = LocalUriHandler.current
+  val version = BuildConfig.VERSION_NAME
+  var update by remember { mutableStateOf<UpdateState>(UpdateState.Idle) }
 
   Scaffold(snackbarHost = { SnackbarHost(snackbarHostState) }) { innerPadding ->
     LazyColumn(
@@ -83,6 +98,23 @@ fun HomeScreen() {
 
       item { SectionLabel(text = stringResource(R.string.section_notes)) }
       item { NotesCard() }
+
+      item { SectionLabel(text = stringResource(R.string.section_update)) }
+      item {
+        UpdateCard(
+          version = version,
+          state = update,
+          onCheck = {
+            update = UpdateState.Checking
+            scope.launch {
+              // 联网不能跑在主线程，扔到 IO 再回来更新界面状态。
+              val result = withContext(Dispatchers.IO) { UpdateChecker.check(version) }
+              update = result.toState(version)
+            }
+          },
+          onOpenPage = { url -> uriHandler.openUri(url) },
+        )
+      }
 
       item { SectionLabel(text = stringResource(R.string.section_about)) }
       item { AboutCard() }
@@ -532,7 +564,7 @@ private fun AboutCard() {
         Spacer(modifier = Modifier.width(14.dp))
         Column(modifier = Modifier.weight(1f)) {
           Text(
-            text = stringResource(R.string.about_version),
+            text = stringResource(R.string.about_version, BuildConfig.VERSION_NAME),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurface,
           )
@@ -561,8 +593,127 @@ private fun AboutCard() {
           modifier = Modifier.size(18.dp),
         )
         Spacer(modifier = Modifier.width(8.dp))
-        Text(text = stringResource(R.string.about_repo))
+        Text(text = stringResource(R.string.action_open_repo))
       }
     }
+  }
+}
+private sealed interface UpdateState {
+  data object Idle : UpdateState
+
+  data object Checking : UpdateState
+
+  data class Done(val message: String, val url: String? = null, val ok: Boolean = true) :
+    UpdateState
+}
+
+private fun UpdateChecker.Result.toState(current: String): UpdateState =
+  when (this) {
+    is UpdateChecker.Result.Newer -> UpdateState.Done("发现新版本 $version（当前 $current）", url)
+    is UpdateChecker.Result.UpToDate ->
+      if (version == current) UpdateState.Done("已是最新版本（$current）")
+      else UpdateState.Done("已是最新（本地 $current 比已发布的 $version 还新）")
+
+    is UpdateChecker.Result.Failed -> UpdateState.Done("检查失败：$reason", ok = false)
+  }
+
+/**
+ * 更新卡片：与 Noticon 的 UpdateCard 同型。
+ *
+ * 结果做成**常驻**的一块 chip，而不是一闪而过的 Snackbar —— 用户点完要是走神了，
+ * 回头还能看见结论；失败时也能分清是没网、被限流还是仓库没发过 Release。
+ */
+@Composable
+private fun UpdateCard(
+  version: String,
+  state: UpdateState,
+  onCheck: () -> Unit,
+  onOpenPage: (String) -> Unit,
+) {
+  ElevatedCard(shape = MaterialTheme.shapes.large) {
+    Column(modifier = Modifier.padding(16.dp)) {
+      Row(verticalAlignment = Alignment.CenterVertically) {
+        IconBadge(
+          icon = Icons.Default.Update,
+          containerColor = MaterialTheme.colorScheme.primary,
+          contentColor = MaterialTheme.colorScheme.onPrimary,
+        )
+        Spacer(modifier = Modifier.width(14.dp))
+        Column {
+          Text(
+            text = stringResource(R.string.update_title),
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.onSurface,
+          )
+          Spacer(modifier = Modifier.height(2.dp))
+          Text(
+            text = stringResource(R.string.update_current, version),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+          )
+        }
+      }
+
+      Spacer(modifier = Modifier.height(12.dp))
+      Text(
+        text = stringResource(R.string.update_disclaimer),
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+      )
+
+      val done = state as? UpdateState.Done
+      if (done != null) {
+        Spacer(modifier = Modifier.height(12.dp))
+        ResultChip(done)
+      }
+
+      Spacer(modifier = Modifier.height(16.dp))
+      Row(verticalAlignment = Alignment.CenterVertically) {
+        val checking = state is UpdateState.Checking
+        Button(onClick = onCheck, enabled = !checking) {
+          if (checking) {
+            CircularProgressIndicator(
+              modifier = Modifier.size(16.dp),
+              strokeWidth = 2.dp,
+              color = LocalContentColor.current,
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+          }
+          Text(
+            text =
+              if (checking) stringResource(R.string.update_checking)
+              else stringResource(R.string.update_title)
+          )
+        }
+        val url = done?.url
+        if (url != null) {
+          Spacer(modifier = Modifier.width(10.dp))
+          OutlinedButton(onClick = { onOpenPage(url) }) {
+            Text(text = stringResource(R.string.update_go_download))
+          }
+        }
+      }
+    }
+  }
+}
+
+/** 检查结果：成功走 secondaryContainer，失败走 errorContainer，一眼能分清 */
+@Composable
+private fun ResultChip(done: UpdateState.Done) {
+  Surface(
+    modifier = Modifier.fillMaxWidth(),
+    shape = MaterialTheme.shapes.medium,
+    color =
+      if (done.ok) MaterialTheme.colorScheme.secondaryContainer
+      else MaterialTheme.colorScheme.errorContainer,
+    contentColor =
+      if (done.ok) MaterialTheme.colorScheme.onSecondaryContainer
+      else MaterialTheme.colorScheme.onErrorContainer,
+  ) {
+    Text(
+      text = done.message,
+      style = MaterialTheme.typography.bodyMedium,
+      modifier = Modifier.padding(horizontal = 14.dp, vertical = 11.dp),
+    )
   }
 }

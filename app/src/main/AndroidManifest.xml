@@ -1,6 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- 仅供本 App 的"检查更新"去 GitHub Releases API 拉最新版本号；
+         被注入的进程用的是它们自己的权限，不受这条影响。 -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
     <application
         android:icon="@mipmap/ic_launcher"
         android:label="@string/appName"
