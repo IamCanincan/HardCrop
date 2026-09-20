@@ -1,5 +1,6 @@
 android
 com.android.launcher3
+com.google.android.apps.nexuslauncher
 com.android.systemui
 com.android.settings
 com.android.intentresolver

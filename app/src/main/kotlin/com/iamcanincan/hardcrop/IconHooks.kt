@@ -77,10 +77,20 @@ private fun hookPixelLauncher(
 ) {
   if (Build.VERSION.SDK_INT < Build.VERSION_CODES.BAKLAVA) return
 
+  // Launcher3 的类在**不同 ROM 上包名不同**：
+  // - 类原生 / AOSP（LineageOS、Sony 等）：进程 `com.android.launcher3`，
+  //   内部类沿用 `com.android.launcher3.*`
+  // - Pixel / Nexus Launcher：进程 `com.google.android.apps.nexuslauncher`，
+  //   内部类**可能**被重打包到 `com.google.android.apps.nexuslauncher.*`
+  // 两个都试一遍，哪个存在用哪个。
+  val launcherPkgs = listOf("com.android.launcher3", "com.google.android.apps.nexuslauncher")
   val baseIconFactoryClass =
-    classOf("com.android.launcher3.icons.BaseIconFactory", param) ?: return
+    firstClassOf(launcherPkgs.map { "$it.icons.BaseIconFactory" }, param) ?: return
   val iconOptionsClass =
-    classOf($$"com.android.launcher3.icons.BaseIconFactory$IconOptions", param) ?: return
+    firstClassOf(
+      launcherPkgs.map { pkg -> pkg + ".icons.BaseIconFactory" + '$' + "IconOptions" },
+      param,
+    ) ?: return
   val drawFullBleedField =
     runCatching {
         iconOptionsClass.getDeclaredField("drawFullBleed").apply { isAccessible = true }
@@ -183,6 +193,17 @@ private fun declaredConstructors(clazz: Class<*>): List<Constructor<*>> =
 
 private fun classOf(name: String, param: XposedModuleInterface.PackageReadyParam): Class<*>? =
   runCatching { Class.forName(name, true, param.classLoader) }.getOrNull()
+
+/**
+ * 按候选名依次尝试，返回**第一个存在**的类。
+ *
+ * Launcher3 的内部类在不同 ROM 上包名不同（AOSP 的 `com.android.launcher3.*` vs
+ * Pixel 的 `com.google.android.apps.nexuslauncher.*`），所以类名不能写死一个。
+ */
+private fun firstClassOf(
+  names: List<String>,
+  param: XposedModuleInterface.PackageReadyParam,
+): Class<*>? = names.firstNotNullOfOrNull { classOf(it, param) }
 
 private fun setIntField(obj: Any, name: String, value: Int) = runCatching {
   obj.javaClass.getDeclaredField(name).apply { isAccessible = true }.set(obj, value)
