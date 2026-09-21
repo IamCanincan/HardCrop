@@ -13,6 +13,7 @@ import android.graphics.Rect
 import android.graphics.drawable.AdaptiveIconDrawable
 import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.Drawable
+import android.os.Build
 import android.util.Log
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.ceil
@@ -62,6 +63,23 @@ class CircleIconDrawable(icon: Drawable) :
   private val sourceIcon: Drawable = icon
 
   private val sourceState: ConstantState? = icon.constantState
+
+  /**
+   * 主题图标（Android 13+ 的「动态取色」）染色的依据是 adaptive 图标自带的
+   * **monochrome 层**。包装时只给了背景 + 前景、这一层是空的 —— 开了主题图标的
+   * 启动器会发现它取不到 monochrome，这些图标就**不会被染色**。
+   *
+   * 所以原图标自带的 monochrome 要原样透传回去。用重写 `getMonochrome()` 而不是
+   * 三参构造：那个构造器 API 33 才有，低版本上解析不到会直接 `NoSuchMethodError`。
+   */
+  private val sourceMonochrome: Drawable? =
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+      (icon as? AdaptiveIconDrawable)?.monochrome
+    } else {
+      null
+    }
+
+  override fun getMonochrome(): Drawable? = sourceMonochrome
 
   override fun draw(canvas: Canvas) {
     // 背景是透明的，画它等于什么都没画 —— 圆在前景层。

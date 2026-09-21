@@ -10,9 +10,9 @@
         老式写法（xposeddescription meta-data / module.prop 里的 description=）已经不用，
         那是给 API <= 93 的旧框架用的，留着反而让模块变成「兼容模式」。
 
-        长度约定：中文 <= 26 字，太长在模块列表里会占好几行。当前 19 字。
+        长度约定：中文 <= 26 字，太长在模块列表里会占好几行。当前 18 字。
     -->
-    <string name="xposed_description">把非自适应图标裁成圆形，已是自适应的不动</string>
+    <string name="xposed_description">把应用图标强制裁成圆形，含自适应图标</string>
 
     <!-- Hero 顶栏 -->
     <string name="hero_subtitle">把非圆形的应用图标强制裁成圆形</string>
@@ -82,7 +82,7 @@
 
     <!-- 说明 -->
     <string name="section_notes">说明</string>
-    <string name="note_adaptive">已经是自适应图标的应用不会被改动。</string>
+    <string name="note_adaptive">自适应图标也会被强制裁成圆形：系统给它的形状（圆角方、水滴等）不一定是圆。</string>
     <string name="note_tiles">快捷设置磁贴画的是单色小图形，被排除在外。</string>
     <string name="note_boot">框架守护进程启动晚于 system_server，刚开机时早期进程可能未注入。</string>
     <string name="note_launcher3">Android 16 及以上会关掉桌面自带的背景板，图标按原样铺满圆形。</string>
@@ -109,5 +109,5 @@
     <!-- 关于 -->
     <string name="section_about">关于</string>
     <string name="about_version">版本 %1$s · MIT 许可</string>
-    <string name="about_body">源码与说明在 GitHub；只做“非自适应图标 → 圆形裁切”这一件事。</string>
+    <string name="about_body">源码与说明在 GitHub；只做“应用图标 → 圆形裁切”这一件事。</string>
 </resources>

@@ -1,9 +1,11 @@
 # HardCrop
 
-一个只做一件事的 Xposed 模块：**把非自适应图标强制裁成圆形**，让它们和系统里被统一形状处理过的自适应图标看起来一致。
+一个只做一件事的 Xposed 模块：**把应用图标强制裁成正圆**，不管它原本是方的、圆角方的，还是系统给的别的形状。
 
-- 只处理「非自适应」图标。已经是 `AdaptiveIconDrawable` 的图标交给系统，模块不碰。
-- 圆形来自系统的自适应图标 mask（本机上是正圆），不铺底色、不改图标内容大小。
+- **自适应图标同样要裁**：它的形状由 ROM 的 mask 决定（圆角方 / 水滴 / 方），不一定是圆。
+  早期版本放行了自适应图标，这正是「只有桌面生效」的根因之一。
+- 圆是我们自己的遮罩裁出来的（圆外透明），**不依赖系统的 `config_icon_mask`**；
+  不铺底色、不改图标内容。
 - 不依赖任何图标包。模块本身无需配置（应用内的界面只提供作用域清单、启用步骤与检查更新）。
 
 ## 安装
@@ -49,14 +51,19 @@ adb logcat -s HardCrop
 正常时每个作用域进程会打印：
 
 ```
-onPackageReady com.android.settings, sdk 36
-PixelLauncher: 2 createBadgedIconBitmap hooked in com.android.launcher3  （仅桌面进程；
-Pixel 上进程名是 com.google.android.apps.nexuslauncher）
+install in com.android.settings, sdk 36
+PixelLauncher: 2 createBadgedIconBitmap hooked  （仅桌面进程；Pixel 上进程名是
+                                                 com.google.android.apps.nexuslauncher）
 Hooked com.android.settings
 ```
 
-如果只看到 `No icon loader is found, nothing is hooked`，说明当前系统里两个加载通道
-（`Resources.getDrawableForDensity` 与 `ApplicationPackageManager.getDrawableInternal`）都没挂上，
+通道挂不上时还会打印原因（`... not found` / `ctors=0 hooked=0`），
+这些告警只说明**该 ROM 上没有这个类**（例如 Sony 的 SystemUI 里 splash 相关类被 R8 削成空壳），
+不影响别的通道。
+
+如果只看到 `No icon loader is found, nothing is hooked`，说明当前系统里几个加载通道
+（`Resources.getDrawableForDensity` / `Resources.getDrawable` 与
+`ApplicationPackageManager.getDrawableInternal` / `getDrawable`）都没挂上，
 模块会主动放弃打标记，此时不会有任何图标被改动（也不会弄坏图标）。
 
 ## 原理
@@ -85,14 +92,17 @@ Hooked com.android.settings
 7. **设置页自适应包装**（Android 15+）：`com.android.settings.Utils.getAdaptiveIcon`
    会把非自适应图标自己套一层形状，先把入参换成裁好的，它就原样返回。
 8. **`CircleIconDrawable` 继承 `AdaptiveIconDrawable`，形状自己画圆，不依赖系统 mask**。
-   `RoundedIconDrawable`（background 层）在自己 bounds（1.5× view）内把原图标 cover 到
-   中心 2/3（= 最终 view bounds 大小），再用 `DST_IN` 在离屏位图上裁一个内切圆：
-   - launcher 按 adaptive 语义只取 background / foreground 分别绘制，**不调我们的 `draw()`**，
-     所以圆形必须在 background 的 `draw()` 里就画好。
-   - 父类把 layer bounds 设成 `1.5 × view bounds`，里面画到中心 2/3 = 最终 view bounds
-     大小，1:1 不放大。
-   - 形状由我们定（正圆），不再看 `config_icon_mask`：mask 只能"保留"不能"凭空填出"
-     圆外部分，而我们圆外本来透明 → 无论 ROM 的 mask 是圆是方是水滴，看到的都是圆。
+   结构是 `背景透明 + 前景 = 套过圆形遮罩的原图标`：
+   - 图标包的三件套是「前景（upon）/ 遮罩（mask）/ 背景（back）」，我们只取遮罩那层，
+     两个装饰层留空 —— 形状完全由那个圆决定。
+   - 遮罩用 `EVEN_ODD` 的「整块矩形 + 圆」现造（重叠处计数为偶 → 成为洞，
+     填出来的正是圆外那一圈），配合 `DST_OUT` 把圆外擦掉。与图标包给的那张遮罩 PNG
+     同构，但不必带一张超大位图。
+   - 缩放由外层 `ViewportDrawable` 负责（对应参考实现的 `ScaleDrawable`），
+     `getIntrinsicWidth/Height` 报 `原尺寸 / scale`。**缩放别在画的时候自己算** ——
+     那样 `AdaptiveIconDrawable` 报出的固有尺寸会只有 2/3。
+   - **必须重写 `draw()` 且不调 `super.draw()`**：父类 `draw()` 会在合成之后再套一次
+     系统 mask，形状就变回 ROM 决定的那个（圆角方 / 水滴 / 方）。
 9. **Android 16+**（BAKLAVA）额外 hook `BaseIconFactory.createBadgedIconBitmap`（Pixel / AOSP Launcher3），
    把 `IconOptions.drawFullBleed` 设成 `false`，让 launcher 不再加自己的白圆背景板。
    旧版 Android 没有这个开关，hook 自动 no-op。
@@ -170,7 +180,8 @@ Hooked com.android.settings
 **怎么验证它生效**：日志里会出现 `PixelLauncher: 2 createBadgedIconBitmap hooked in
 com.android.launcher3`（桌面进程里有两个 `createBadgedIconBitmap` 重载被挂上；
 Pixel 上进程名显示为 `com.google.android.apps.nexuslauncher`）。
-之后看抽屉 —— **所有非自适应图标都会变成圆形 + 内容填满、圆外透明**，跟自适应图标观感一致。
+之后看抽屉 —— **所有图标都会变成圆形 + 内容填满、圆外透明**（自适应图标也一样，
+它原本的形状是 ROM 决定的）。
 
 > Launcher3 的内部类（`BaseIconFactory` / `IconOptions`）在不同 ROM 上包名可能不同：
 > 类原生 / AOSP 是 `com.android.launcher3.*`，Pixel / Nexus 可能被重打包到
