@@ -57,6 +57,25 @@ class CircleIconDrawable(icon: Drawable) :
   ) {
 
   /**
+   * **不调用 `super.draw()`** —— 这是能否在所有页面都显示成圆的关键。
+   *
+   * `AdaptiveIconDrawable` 自带的 `draw()` 会把两层合成后再套一次**系统 mask**
+   * （`config_icon_mask`）。于是最终形状变成 ROM 决定的那个形状（圆角方 / 水滴 / 方），
+   * 而不是我们裁好的圆 —— 凡是走 `draw()` 渲染的页面都会是这个结果。
+   *
+   * 参考项目为此专门写了 `UnClipAdaptiveIconDrawable`：重写 `draw()` 用「全幅矩形」路径
+   * 作画，绕开 mask。它靠反射 `mLayersBitmap` / `mLayersShader` / `mCanvas` / `mPaint`
+   * 这几个私有字段实现。我们不反射（版本一变就断），改用更直接的办法：
+   * 圆已经在 [RoundedIconDrawable] 里裁好了，直接把它按**自己的 bounds** 画出来即可 ——
+   * 父类给这一层设的 bounds 正是 `(1 + 2 × extraInset)` 的全幅，圆因此正好落在可见区，
+   * 不经过任何系统 mask。
+   */
+  override fun draw(canvas: Canvas) {
+    val bg = background
+    if (bg == null) super.draw(canvas) else bg.draw(canvas)
+  }
+
+  /**
    * 副本必须是新实例，且仍然要是 [AdaptiveIconDrawable]（否则 launcher 又走 wrap 路径）。
    */
   override fun getConstantState(): ConstantState? {
