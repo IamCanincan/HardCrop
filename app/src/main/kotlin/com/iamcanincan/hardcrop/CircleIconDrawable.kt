@@ -8,45 +8,47 @@ import android.graphics.Paint
 import android.graphics.PixelFormat
 import android.graphics.PorterDuff
 import android.graphics.PorterDuffXfermode
+import android.graphics.Rect
 import android.graphics.drawable.AdaptiveIconDrawable
 import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.Drawable
 
 /**
- * 父类 `AdaptiveIconDrawable` 把每一层的 bounds 设成 `1.5 × view bounds`
- * （`DEFAULT_VIEW_PORT_SCALE = 1 / 1.5`），只有中心那 `view bounds` 是可见区域。
- * 内容要画到中心 `1 / 1.5` 才是 1:1 呈现。
+ * 自适应图标多出来的那一圈。`AdaptiveIconDrawable` 把每一层的 bounds 设成
+ * `(1 + 2 × extraInset) × view bounds`，只有中心的 view bounds 是可见区域。
+ *
+ * 这个值**随安卓版本变**（老版本是 0.25 → 1/1.5），所以一律动态取，不写死。
  */
-private const val VIEW_PORT_SCALE = 1f / 1.5f
+private val EXTRA_INSET_FRACTION = AdaptiveIconDrawable.getExtraInsetFraction()
+
+/** 内容要缩到这个比例，才能在自适应图标里 1:1 呈现。 */
+private val VIEW_PORT_SCALE = 1f / (1f + 2f * EXTRA_INSET_FRACTION)
 
 /**
- * 把非自适应图标裁成圆形，并让 launcher 按自适应图标的方式处理它。
+ * 把非自适应图标**裁成圆形**，并让系统按自适应图标的方式对待它 —— 也就是让非自适应
+ * 图标的表现和自适应图标一致。
  *
  * ## 为什么必须是 AdaptiveIconDrawable
- * AOSP Launcher3 / Pixel Launcher 对桌面图标有两条完全不同的路径：
- * - `instanceof AdaptiveIconDrawable` → 走 **adaptive 路径**：取 `getBackground()` /
- *   `getForeground()` 分别绘制，再加系统 mask（`config_icon_mask`）裁切，
- *   **不加 launcher 自带的白色背景板、不缩到 safe zone**。
- * - 其他 → 走 wrap 路径：加 launcher 自带的白圆板 + 缩到 safe zone。
+ * Launcher3 / Pixel Launcher 对桌面图标有两条路径：
+ * - `instanceof AdaptiveIconDrawable` → adaptive 路径：取 `getBackground()` /
+ *   `getForeground()` 分别绘制，再加系统 mask 裁切。
+ * - 其他 → wrap 路径：加 launcher 自带的背景板 + 缩到 safe zone。
  *
- * 要拿到"无白边"只有走 adaptive 路径这一条路。
+ * 要"和自适应图标一样"，必须走 adaptive 路径。
  *
- * ## 为什么实际内容要放在 background 层
- * launcher 按 adaptive 语义**只取 background / foreground 分别绘制**，它并不会调用外层
- * 的 `draw()`。内容画在外层的 `draw()` 里 = launcher 只画了两个透明层（表现为纯黑）。
+ * ## 为什么实际内容要放在 background 层（这是关键，之前几次都栽在这）
+ * launcher 按 adaptive 语义**只取 background / foreground 分别绘制**，它不会调用外层
+ * 的 `draw()`。如果内容放在外层 `draw()` 里，launcher 只会画两个透明层 → 圆看不见。
+ * 也不能放在 foreground：foreground 是透明层，且部分页面（如 Settings 应用列表）直绘
+ * 整个 drawable 时只把"非透明层"渲染出来，放 foreground 等于没有圆。
  *
- * 所以：**foreground 保持透明（不遮挡），实际内容放 background**。
+ * 所以：**内容放 background 层**（[RoundedIconDrawable]），foreground 保持透明。
  *
  * ## 为什么形状由我们自己画，不看系统 mask
- * 早期版本让系统 mask 去裁：`config_icon_mask` 由 ROM 决定，有的圆、有的圆角方、
- * 有的水滴 —— 于是"裁出来是什么形状"完全随设备变。
- *
- * 现在改成 [RoundedIconDrawable] 在离屏位图上用 `DST_IN` 自己画一个正圆。这样无论
- * 系统 mask 是什么形状，看到的都是同一个圆：mask 只能"保留"像素，不能"凭空填出"
- * 圆外的部分，而我们圆外本来就是透明的。
- *
- * 这比去 hook 系统 mask 或依赖某个版本才有的开关稳得多，且对所有 Android 版本、
- * 所有桌面（含第三方）都成立。
+ * 实测这台机的 Settings 应用列表**不套系统 mask**，直绘整个 drawable —— 靠系统 mask
+ * 去裁的话，这一页永远是原图方形。所以在 [RoundedIconDrawable] 里用 `DST_IN` 自己画一个
+ * 正圆：无论系统 mask 是什么形状，看到的都是同一个圆（mask 只能"保留"像素、不能凭空
+ * 填出圆外部分，而我们圆外本来就是透明的）。
  */
 class CircleIconDrawable(icon: Drawable) :
   AdaptiveIconDrawable(
@@ -72,10 +74,11 @@ class CircleIconDrawable(icon: Drawable) :
 }
 
 /**
- * 把原图标按 cover 方式画到 bounds 的**中心 2/3**，再裁成正圆。
+ * 把原图标按 cover 方式画到 bounds 的**中心可见区**，再裁成正圆。
  *
- * 父类会把这一层的 bounds 设成 `1.5 × view bounds`，所以"中心 2/3"正好等于最终可见的
- * view bounds —— 原图标因此 1:1 呈现在圆里，既不放大也不留边。
+ * 父类会把这一层的 bounds 设成 `(1 + 2 × extraInset) × view bounds`，所以"中心
+ * `1 / (1 + 2 × extraInset)`"正好等于最终可见的 view bounds —— 原图标因此 1:1 呈现在圆里，
+ * 既不放大也不留边。
  */
 private class RoundedIconDrawable(private val icon: Drawable) : Drawable() {
 
@@ -149,21 +152,21 @@ private class RoundedIconDrawable(private val icon: Drawable) : Drawable() {
    * `Drawable` 默认实现返回 null，而 Launcher3 的 `FloatingIconView`（点击桌面图标时
    * 那个图标浮起的动画）在 `getIconResult()` 里直接写
    * `icon.getConstantState().newDrawable()` —— 拿到 null 就是 NPE，整个桌面进程崩掉。
-   * 上一版正是漏了这里，导致"点一下图标桌面就崩"。
    */
   override fun getConstantState(): ConstantState? {
     val src = icon.constantState
     return if (src != null) {
       object : ConstantState() {
         override fun newDrawable(): Drawable = RoundedIconDrawable(src.newDrawable())
+
         override fun getChangingConfigurations(): Int = src.changingConfigurations
       }
     } else {
       // 原图标自己也不支持 ConstantState（自定义 Drawable 常见）。
-      // 这种没法安全地"重建一个等价副本"，就退回复用同一个原图标 ——
-      // 比返回 null 崩掉桌面好得多；FloatingIconView 只是临时画一下这个副本。
+      // 退回复用同一个原图标比返回 null 崩掉桌面好得多。
       object : ConstantState() {
         override fun newDrawable(): Drawable = RoundedIconDrawable(icon)
+
         override fun getChangingConfigurations(): Int = changingConfigurations
       }
     }

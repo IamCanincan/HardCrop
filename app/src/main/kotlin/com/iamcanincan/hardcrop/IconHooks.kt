@@ -11,6 +11,7 @@ import android.content.pm.ProviderInfo
 import android.content.pm.ResolveInfo
 import android.content.pm.ServiceInfo
 import android.content.res.Resources
+import android.graphics.drawable.AdaptiveIconDrawable
 import android.graphics.drawable.Drawable
 import android.os.Build
 import android.os.Parcel
@@ -99,6 +100,7 @@ private fun install(xposed: XposedInterface, classLoader: ClassLoader, packageNa
   hookBatchIconIds(xposed, classLoader)
   hookShortcutIcons(xposed)
   hookArchivedAppIcon(xposed, classLoader)
+  hookPackageManagerIconGetters(xposed, classLoader)
 
   if (packageName == "com.android.launcher3" ||
       packageName == "com.google.android.apps.nexuslauncher"
@@ -107,7 +109,10 @@ private fun install(xposed: XposedInterface, classLoader: ClassLoader, packageNa
     hookTaskIcons(xposed, classLoader)
   }
   if (packageName == "com.android.systemui") hookSplashScreenIcon(xposed, classLoader)
-  if (packageName == "com.android.settings") hookSettingsAdaptiveIcon(xposed, classLoader)
+  if (packageName == "com.android.settings") {
+    hookSettingsAdaptiveIcon(xposed, classLoader)
+    hookBatteryIcons(xposed, classLoader)
+  }
 
   Log.d(TAG, "Hooked $packageName")
 }
@@ -122,10 +127,25 @@ private fun hookIconLoaders(xposed: XposedInterface, classLoader: ClassLoader): 
   for (method in declaredMethods(Resources::class.java, "getDrawableForDensity")) {
     hooked = hookIconLoader(xposed, method) || hooked
   }
+  // deprecated 入口（资源 ID + 主题）：launcher 的快捷面板 / AllApps 数据加载
+  // 走的就是这两个重载，没走 `getDrawableForDensity`。
+  for (method in declaredMethods(Resources::class.java, "getDrawable")) {
+    if (hookIconLoader(xposed, method)) {
+      Log.d(TAG, "IconLoaders: Resources.getDrawable (${method.parameterTypes.joinToString { it.simpleName }}) hooked")
+      hooked = true
+    }
+  }
   val packageManager = classOf("android.app.ApplicationPackageManager", classLoader)
   if (packageManager != null) {
     for (method in declaredMethods(packageManager, "getDrawableInternal")) {
       hooked = hookIconLoader(xposed, method) || hooked
+    }
+    // Settings 等应用拿其它包图标走这个：签名 (String, int, ApplicationInfo) 等。
+    for (method in declaredMethods(packageManager, "getDrawable")) {
+      if (hookIconLoader(xposed, method)) {
+        Log.d(TAG, "IconLoaders: APM.getDrawable (${method.parameterTypes.joinToString { it.simpleName }}) hooked")
+        hooked = true
+      }
     }
   }
   return hooked
@@ -178,6 +198,34 @@ private fun hookArchivedAppIcon(xposed: XposedInterface, classLoader: ClassLoade
     }
   }
   if (hooked > 0) Log.d(TAG, "ArchivedAppIcon: $hooked hooked")
+}
+
+/**
+ * 一些场景（电池页、某些缓存接口）不拿 resId 而是直接拿 Drawable —— 走
+ * `getApplicationIcon` / `getActivityIcon` / `getDefaultActivityIcon` 等，
+ * 它们直接返回 `Drawable`，没法用"resId 打标记"那套。这条路径用结果包装：
+ * 不管原方法返回什么 Drawable，都套成 `CircleIconDrawable`（adaptive 图标
+ * 系统自己会画圆，不动；其它一律裁圆）。
+ */
+private fun hookPackageManagerIconGetters(xposed: XposedInterface, classLoader: ClassLoader) {
+  val packageManager = classOf("android.app.ApplicationPackageManager", classLoader) ?: return
+  var hooked = 0
+  for (name in listOf("getApplicationIcon", "getActivityIcon", "getDefaultActivityIcon", "loadItemIcon")) {
+    for (method in declaredMethods(packageManager, name)) {
+      runCatching {
+        xposed.hook(method).intercept { chain ->
+          val icon = chain.proceed(chain.args.toTypedArray()) as? Drawable ?: return@intercept null
+          val pkg = runCatching { chain.args.firstOrNull { it is String } as? String }.getOrNull()
+          if (pkg == "com.tencent.mobileqq" || pkg == "com.tencent.mm") {
+            Log.d(TAG, "PMGetter $name(${(chain.args.map { it?.javaClass?.simpleName }).joinToString()}) -> ${icon.javaClass.name} pkg=$pkg")
+          }
+          clipToCircle(icon)
+        }
+        hooked++
+      }
+    }
+  }
+  if (hooked > 0) Log.d(TAG, "PM IconGetters: $hooked hooked")
 }
 
 /**
@@ -425,8 +473,14 @@ private fun hookSplashScreenIcon(xposed: XposedInterface, classLoader: ClassLoad
 }
 
 /**
- * Android 15+ 的设置页会把图标再过一遍 `Utils.getAdaptiveIcon()`，非自适应图标会被
- * 它自己套一层形状。这里先把图标换成裁好的，它就原样返回了。
+ * Android 15+ 的设置页会把图标再过一遍 `Utils.getAdaptiveIcon()`：非自适应图标会被它
+ * **套上系统自己的形状（含系统自带的背景板）**。
+ *
+ * 这里在系统处理之前就把图标换成已经是 `AdaptiveIconDrawable` 的形态 —— 系统看到
+ * "已经是 adaptive" 就不会再套它自己的那一层，图标按我们给的样子呈现。
+ *
+ * 必须 `deoptimize()`：这个方法会被内联优化掉，不 deoptimize 的话 hook 根本不会触发
+ * （实测加之前日志里一次都没命中）。
  */
 private fun hookSettingsAdaptiveIcon(xposed: XposedInterface, classLoader: ClassLoader) {
   if (Build.VERSION.SDK_INT < Build.VERSION_CODES.VANILLA_ICE_CREAM) return
@@ -434,18 +488,105 @@ private fun hookSettingsAdaptiveIcon(xposed: XposedInterface, classLoader: Class
   var hooked = 0
   for (method in declaredMethods(utils, "getAdaptiveIcon")) {
     runCatching {
+      xposed.deoptimize(method)
       xposed.hook(method).intercept { chain ->
         val args = chain.args
+        val sig = args.joinToString { it?.javaClass?.simpleName ?: "null" }
         val index = args.indexOfFirst { it is Drawable }
-        if (index < 0) return@intercept chain.proceed(args.toTypedArray())
+        if (index < 0) {
+          Log.d(TAG, "Settings.getAdaptiveIcon($sig) no-drawable")
+          return@intercept chain.proceed(args.toTypedArray())
+        }
+        val inIcon = args[index] as Drawable
+        Log.d(
+          TAG,
+          "Settings.getAdaptiveIcon($sig) idx=$index in=${inIcon.javaClass.simpleName} adaptive=${inIcon is AdaptiveIconDrawable}",
+        )
         val replaced = args.toMutableList()
-        replaced[index] = clipToCircle(args[index] as Drawable)
+        replaced[index] = clipToCircle(inIcon)
         chain.proceedWith(chain.thisObject, replaced.toTypedArray())
       }
       hooked++
     }
   }
-  if (hooked > 0) Log.d(TAG, "Settings: $hooked hooked")
+  if (hooked > 0) Log.d(TAG, "Settings: $hooked getAdaptiveIcon hooked (deoptimized)")
+}
+
+/**
+ * 电池用量页的图标**不走** `PackageManager`，也不走 `Resources.getDrawable`：
+ * 它先把图标装进 `BatteryDiffEntry.mAppIcon`（旧版是 `BatteryEntry.mIcon`），
+ * UI 再从 `getAppIcon()` 或者直接从字段里取。整条链上没有任何我们挂过的出口 ——
+ * 实测打开电池页时 `clipToCircle` 一次都没被调用（trace 日志 0 条）。
+ *
+ * 所以这里对着这两个类直接下手：
+ * - `getAppIcon()`：包装返回值
+ * - `loadLabelAndIcon()` / `loadNameAndIcon()`：跑完之后把字段里的图标也换掉，
+ *   这样"直接读字段"的地方同样是圆的
+ */
+private fun hookBatteryIcons(xposed: XposedInterface, classLoader: ClassLoader) {
+  var hooked = 0
+
+  val diffEntry =
+    classOf("com.android.settings.fuelgauge.batteryusage.BatteryDiffEntry", classLoader)
+  if (diffEntry != null) {
+    for (name in listOf("getAppIcon", "getBadgeIconForUser")) {
+      for (method in declaredMethods(diffEntry, name)) {
+        runCatching {
+          runCatching { xposed.deoptimize(method) }
+          xposed.hook(method).intercept { chain ->
+            val icon = chain.proceed(chain.args.toTypedArray()) as? Drawable
+            if (icon == null) null else clipToCircle(icon)
+          }
+          hooked++
+        }
+      }
+    }
+    for (name in listOf("loadLabelAndIcon", "loadNameAndIconForUid")) {
+      for (method in declaredMethods(diffEntry, name)) {
+        runCatching {
+          runCatching { xposed.deoptimize(method) }
+          xposed.hook(method).intercept { chain ->
+            val result = chain.proceed(chain.args.toTypedArray())
+            wrapIconField(chain.thisObject, "mAppIcon")
+            result
+          }
+          hooked++
+        }
+      }
+    }
+  }
+
+  val entry = classOf("com.android.settings.fuelgauge.batteryusage.BatteryEntry", classLoader)
+  if (entry != null) {
+    for (method in declaredMethods(entry, "loadNameAndIcon")) {
+      runCatching {
+        runCatching { xposed.deoptimize(method) }
+        xposed.hook(method).intercept { chain ->
+          val result = chain.proceed(chain.args.toTypedArray())
+          wrapIconField(chain.thisObject, "mIcon")
+          result
+        }
+        hooked++
+      }
+    }
+  }
+
+  if (hooked > 0) Log.d(TAG, "Battery: $hooked hooked")
+}
+
+/**
+ * 把 `owner` 里叫 `name` 的 Drawable 字段换成裁圆后的版本。
+ *
+ * 已经是 `AdaptiveIconDrawable` 的不动 —— 自己包出来的 [CircleIconDrawable] 也是 adaptive，
+ * 所以这个判断同时避免了对同一个图标反复包。
+ */
+private fun wrapIconField(owner: Any?, name: String) {
+  if (owner == null) return
+  runCatching {
+    val field = fieldOf(owner.javaClass, name) ?: return
+    val icon = field.get(owner) as? Drawable ?: return
+    if (icon !is AdaptiveIconDrawable) field.set(owner, clipToCircle(icon))
+  }
 }
 
 private fun hookShortcutIcons(xposed: XposedInterface) {
