@@ -20,10 +20,14 @@ import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.Android
 import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.CleaningServices
+import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Dashboard
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.Power
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Schedule
@@ -38,6 +42,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ElevatedCard
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -49,6 +54,9 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -58,6 +66,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
@@ -91,6 +100,11 @@ private val OTHER_RESTARTABLE =
     "com.android.permissioncontroller",
   )
 
+/**
+ * 顶栏随列表滚动收起、往回滑立刻回来 —— 内容很长（9 个分区），
+ * 滚到中段时有个常驻入口（标题 + 仓库）比"一路滑回顶"省事。
+ */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen() {
   val snackbarHostState = remember { SnackbarHostState() }
@@ -99,57 +113,82 @@ fun HomeScreen() {
   val version = BuildConfig.VERSION_NAME
   val context = LocalContext.current
   var update by remember { mutableStateOf<UpdateState>(UpdateState.Idle) }
+  val scrollBehavior = TopAppBarDefaults.enterAlwaysScrollBehavior()
 
-  Scaffold(snackbarHost = { SnackbarHost(snackbarHostState) }) { innerPadding ->
+  Scaffold(
+    modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
+    topBar = {
+      TopAppBar(
+        title = { Text(text = stringResource(R.string.appName)) },
+        actions = {
+          IconButton(onClick = { uriHandler.openUri(REPO_URL) }) {
+            Icon(
+              imageVector = Icons.Default.Code,
+              contentDescription = stringResource(R.string.action_open_repo),
+            )
+          }
+        },
+        scrollBehavior = scrollBehavior,
+      )
+    },
+    snackbarHost = { SnackbarHost(snackbarHostState) },
+  ) { innerPadding ->
     LazyColumn(
       modifier = Modifier.fillMaxSize().padding(innerPadding),
-      contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 24.dp),
-      verticalArrangement = Arrangement.spacedBy(16.dp),
+      contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 24.dp),
+      // 组与组之间 20dp；小标题与它自己的卡片之间只有 10dp（见 [Section]），
+      // 这样"标题领着哪张卡"一眼能看出来。
+      verticalArrangement = Arrangement.spacedBy(20.dp),
     ) {
       item { HeroHeader() }
       item { StatusCard() }
 
-      item { SectionLabel(text = stringResource(R.string.section_scope)) }
-      item { ScopeGroup() }
+      item { Section(text = stringResource(R.string.section_scope)) { ScopeGroup() } }
 
-      item { SectionLabel(text = stringResource(R.string.section_steps)) }
-      item { StepsCard() }
+      item { Section(text = stringResource(R.string.section_steps)) { StepsCard() } }
 
-      item { SectionLabel(text = stringResource(R.string.section_verify)) }
-      item { VerifyCard(snackbarHostState) }
+      item { Section(text = stringResource(R.string.section_verify)) { VerifyCard(snackbarHostState) } }
 
-      item { SectionLabel(text = stringResource(R.string.section_tools)) }
-      item { ToolsCard(snackbarHostState) }
+      item { Section(text = stringResource(R.string.section_tools)) { ToolsCard(snackbarHostState) } }
 
-      item { SectionLabel(text = stringResource(R.string.section_notes)) }
-      item { NotesCard() }
+      item { Section(text = stringResource(R.string.section_notes)) { NotesCard() } }
 
-      item { SectionLabel(text = stringResource(R.string.section_update)) }
       item {
-        UpdateCard(
-          version = version,
-          state = update,
-          onCheck = {
-            update = UpdateState.Checking
-            scope.launch {
-              // 联网不能跑在主线程，扔到 IO 再回来更新界面状态。
-              val result = withContext(Dispatchers.IO) { UpdateChecker.check(version) }
-              update = result.toState(context, version)
-            }
-          },
-          onOpenPage = { url -> uriHandler.openUri(url) },
-        )
+        Section(text = stringResource(R.string.section_update)) {
+          UpdateCard(
+            version = version,
+            state = update,
+            onCheck = {
+              update = UpdateState.Checking
+              scope.launch {
+                // 联网不能跑在主线程，扔到 IO 再回来更新界面状态。
+                val result = withContext(Dispatchers.IO) { UpdateChecker.check(version) }
+                update = result.toState(context, version)
+              }
+            },
+            onOpenPage = { url -> uriHandler.openUri(url) },
+          )
+        }
       }
 
-      item { SectionLabel(text = stringResource(R.string.section_about)) }
-      item { AboutCard() }
+      item { Section(text = stringResource(R.string.section_about)) { AboutCard() } }
     }
   }
 }
 
+/** 小标题 + 它领的那张卡。分成一个 item，才能把组内间距压到比组间距小。 */
+@Composable
+private fun Section(text: String, content: @Composable () -> Unit) {
+  Column {
+    SectionLabel(text = text)
+    Spacer(modifier = Modifier.height(10.dp))
+    content()
+  }
+}
+
 /**
- * 顶栏：App 图标 + 名称 + 副说明，整块用 `primaryContainer` 色块。
- * 让第一屏有视觉重量（Material You Expressive 倾向），同时让 hero 不再和下面的卡片"齐平"。
+ * 首屏色块：只放「HC 方块 + 一句话说明 + 版本 chip」。
+ * App 名已经常驻在顶栏里，这里再写一遍纯属重复，所以让位给副标题。
  */
 @Composable
 private fun HeroHeader() {
@@ -158,40 +197,31 @@ private fun HeroHeader() {
     color = MaterialTheme.colorScheme.primaryContainer,
     contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
   ) {
-    Column(modifier = Modifier.padding(20.dp)) {
-      Row(verticalAlignment = Alignment.CenterVertically) {
-        // 在 primaryContainer 背景上，「HC」方块用 onPrimaryContainer 反色，更突出。
-        Surface(
-          shape = RoundedCornerShape(16.dp),
-          color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.12f),
-          modifier = Modifier.size(52.dp),
-        ) {
-          Box(contentAlignment = Alignment.Center) {
-            Text(
-              text = "HC",
-              style = MaterialTheme.typography.titleMedium,
-              color = MaterialTheme.colorScheme.onPrimaryContainer,
-            )
-          }
-        }
-        Spacer(modifier = Modifier.width(14.dp))
-        Column(modifier = Modifier.weight(1f)) {
+    Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+      // 在 primaryContainer 背景上，「HC」方块用 onPrimaryContainer 反色，更突出。
+      Surface(
+        shape = RoundedCornerShape(14.dp),
+        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.12f),
+        modifier = Modifier.size(44.dp),
+      ) {
+        Box(contentAlignment = Alignment.Center) {
           Text(
-            text = stringResource(R.string.appName),
-            style = MaterialTheme.typography.titleLarge,
+            text = "HC",
+            style = MaterialTheme.typography.titleMedium,
             color = MaterialTheme.colorScheme.onPrimaryContainer,
-          )
-          Spacer(modifier = Modifier.height(2.dp))
-          Text(
-            text = stringResource(R.string.hero_subtitle),
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.85f),
           )
         }
       }
-      Spacer(modifier = Modifier.height(14.dp))
-      // 第二行：版本 + MIT（同一行 chip，留出与正文区隔，又不显得空）。
-      VersionChip()
+      Spacer(modifier = Modifier.width(14.dp))
+      Column(modifier = Modifier.weight(1f)) {
+        Text(
+          text = stringResource(R.string.hero_subtitle),
+          style = MaterialTheme.typography.bodyMedium,
+          color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.85f),
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        VersionChip()
+      }
     }
   }
 }
@@ -280,7 +310,7 @@ private fun ScopeGroup() {
         ScopeTag.RECOMMENDED,
       ),
       ScopeItem(
-        Icons.Default.Android,
+        Icons.Default.Memory,
         R.string.scope_systemprocess_title,
         R.string.scope_systemprocess_desc,
         ScopeTag.OPTIONAL,
@@ -335,6 +365,12 @@ private fun ScopeGroup() {
       ),
     )
 
+  // 10 行铺满整页，真正要看的（必选 + 推荐）反而不显眼。
+  // 默认只展开这两档，"可选"折叠成一行按钮——它是"想要更全"时才翻的。
+  var expanded by remember { mutableStateOf(false) }
+  val visible = if (expanded) scopes else scopes.filter { it.tag != ScopeTag.OPTIONAL }
+  val hiddenCount = scopes.size - visible.size
+
   ElevatedCard(shape = MaterialTheme.shapes.large) {
     Column {
       Text(
@@ -344,9 +380,23 @@ private fun ScopeGroup() {
         modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
       )
       HorizontalDivider()
-      scopes.forEachIndexed { index, item ->
+      visible.forEachIndexed { index, item ->
         if (index > 0) HorizontalDivider()
         ScopeRow(item)
+      }
+      HorizontalDivider()
+      TextButton(onClick = { expanded = !expanded }, modifier = Modifier.fillMaxWidth()) {
+        Icon(
+          imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+          contentDescription = null,
+          modifier = Modifier.size(18.dp),
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        Text(
+          text =
+            if (expanded) stringResource(R.string.scope_show_less)
+            else stringResource(R.string.scope_show_all, hiddenCount)
+        )
       }
     }
   }
@@ -458,14 +508,15 @@ private fun StepsCard() {
         Row(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
           Surface(
             shape = MaterialTheme.shapes.extraSmall,
-            color = MaterialTheme.colorScheme.surfaceContainerHighest,
+            // 步骤是有顺序的：用主色底把它和"并列关系的列表"区分开。
+            color = MaterialTheme.colorScheme.primaryContainer,
             modifier = Modifier.size(28.dp),
           ) {
             Box(contentAlignment = Alignment.Center) {
               Text(
                 text = "${index + 1}",
                 style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = MaterialTheme.colorScheme.onPrimaryContainer,
               )
             }
           }
@@ -506,12 +557,17 @@ private fun VerifyCard(snackbarHostState: SnackbarHostState) {
         color = MaterialTheme.colorScheme.onSurfaceVariant,
       )
       Spacer(modifier = Modifier.height(12.dp))
+      // 整块可点：原来只有右侧一个 48dp 的图标按钮能按，命中面积太小。
       Surface(
+        onClick = {
+          clipboard.setText(AnnotatedString(command))
+          scope.launch { snackbarHostState.showSnackbar(copiedMessage) }
+        },
         shape = MaterialTheme.shapes.medium,
         color = MaterialTheme.colorScheme.surfaceContainerHighest,
       ) {
         Row(
-          modifier = Modifier.fillMaxWidth().padding(start = 14.dp, top = 10.dp, bottom = 10.dp),
+          modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
           verticalAlignment = Alignment.CenterVertically,
         ) {
           Text(
@@ -520,19 +576,13 @@ private fun VerifyCard(snackbarHostState: SnackbarHostState) {
             color = MaterialTheme.colorScheme.onSurface,
             modifier = Modifier.weight(1f),
           )
-          IconButton(
-            onClick = {
-              clipboard.setText(AnnotatedString(command))
-              scope.launch { snackbarHostState.showSnackbar(copiedMessage) }
-            }
-          ) {
-            Icon(
-              imageVector = Icons.Default.ContentCopy,
-              contentDescription = stringResource(R.string.verify_copy),
-              tint = MaterialTheme.colorScheme.onSurfaceVariant,
-              modifier = Modifier.size(20.dp),
-            )
-          }
+          Spacer(modifier = Modifier.width(10.dp))
+          Icon(
+            imageVector = Icons.Default.ContentCopy,
+            contentDescription = stringResource(R.string.verify_copy),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(20.dp),
+          )
         }
       }
     }
@@ -597,6 +647,7 @@ private fun ToolsCard(snackbarHostState: SnackbarHostState) {
           scope.launch { snackbarHostState.showSnackbar(cacheSent) }
         },
         modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.large,
       ) {
         Icon(
           imageVector = Icons.Default.Refresh,
@@ -624,6 +675,7 @@ private fun ToolsCard(snackbarHostState: SnackbarHostState) {
             scope.launch { snackbarHostState.showSnackbar(restartSent) }
           },
           modifier = Modifier.weight(1f),
+          shape = MaterialTheme.shapes.large,
         ) {
           Text(text = stringResource(R.string.action_restart_systemui))
         }
@@ -639,6 +691,7 @@ private fun ToolsCard(snackbarHostState: SnackbarHostState) {
             scope.launch { snackbarHostState.showSnackbar(restartSent) }
           },
           modifier = Modifier.weight(1f),
+          shape = MaterialTheme.shapes.large,
         ) {
           Text(text = stringResource(R.string.action_restart_others))
         }
@@ -825,6 +878,7 @@ private fun UpdateCard(
           enabled = !checking,
           modifier =
             if (url == null) Modifier.fillMaxWidth() else Modifier.weight(1f),
+          shape = MaterialTheme.shapes.large,
         ) {
           if (checking) {
             CircularProgressIndicator(
@@ -842,7 +896,7 @@ private fun UpdateCard(
         }
         if (url != null) {
           Spacer(modifier = Modifier.width(10.dp))
-          OutlinedButton(onClick = { onOpenPage(url) }) {
+          OutlinedButton(onClick = { onOpenPage(url) }, shape = MaterialTheme.shapes.large) {
             Text(text = stringResource(R.string.update_go_download))
           }
         }

@@ -62,6 +62,10 @@
     <string name="scope_wellbeing_title">com.google.android.apps.wellbeing</string>
     <string name="scope_wellbeing_desc">数字健康的应用使用列表</string>
 
+    <!-- 作用域列表的展开/收起（默认只显示必选 + 推荐，可选折叠）-->
+    <string name="scope_show_all">展开其余 %1$d 项可选作用域</string>
+    <string name="scope_show_less">收起可选作用域</string>
+
     <!-- 启用步骤 -->
     <string name="section_steps">启用步骤</string>
     <string name="step_1">在 LSPosed 中启用本模块</string>
