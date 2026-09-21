@@ -413,13 +413,27 @@ private fun hookPixelLauncher(xposed: XposedInterface, classLoader: ClassLoader)
   // 两个都试一遍，哪个存在用哪个。
   val launcherPkgs = listOf("com.android.launcher3", "com.google.android.apps.nexuslauncher")
   val baseIconFactoryClass =
-    firstClassOf(launcherPkgs.map { "$it.icons.BaseIconFactory" }, classLoader) ?: return
+    firstClassOf(launcherPkgs.map { "$it.icons.BaseIconFactory" }, classLoader)
+      ?: run {
+        Log.w(TAG, "Launcher: BaseIconFactory not found")
+        return
+      }
   val iconOptionsClass =
     firstClassOf(
       launcherPkgs.map { pkg -> pkg + ".icons.BaseIconFactory" + '$' + "IconOptions" },
       classLoader,
-    ) ?: return
-  val drawFullBleedField = fieldOf(iconOptionsClass, "drawFullBleed") ?: return
+    )
+      ?: run {
+        Log.w(TAG, "Launcher: BaseIconFactory.IconOptions not found")
+        return
+      }
+  val drawFullBleedField =
+    fieldOf(iconOptionsClass, "drawFullBleed")
+      ?: run {
+        // 这个开关是承重的：拿不到它，桌面图标四角会出现黑色方角。留痕。
+        Log.w(TAG, "Launcher: IconOptions.drawFullBleed not found")
+        return
+      }
 
   var hooked = 0
   for (method in
@@ -446,6 +460,11 @@ private fun hookPixelLauncher(xposed: XposedInterface, classLoader: ClassLoader)
  * 系统会分析图标的背景色，背景透明时它判定"图标没有可当背景的部分"，只画不透明区域。
  * 我们把图标裁成了圆（圆外透明），正好落进这个判定。强制标记"背景是复杂的"，
  * 让系统把整张图标画出来。
+ *
+ * ⚠ ROM 相关：Sony（XQ-DQ72 / Android 16）的 SystemUI 里这套 wm.shell 类被 R8 削成了
+ * 空壳 —— `IconColor` 只剩 5 个字段，**连 `<init>` 都没有**（`ctors=0`），所以永远不会被
+ * 实例化，这条 hook 在那里是空操作（钩子注册数为 0 是正常的，不是 bug）。
+ * 参考项目在这台机器上同样如此。类完整的 ROM 上会正常注册。
  */
 private fun hookSplashScreenIcon(xposed: XposedInterface, classLoader: ClassLoader) {
   val iconColor =
@@ -453,26 +472,38 @@ private fun hookSplashScreenIcon(xposed: XposedInterface, classLoader: ClassLoad
       "com.android.wm.shell.startingsurface.SplashscreenContentDrawer\$ColorCache\$IconColor",
       classLoader,
     )
-      ?: return
-  val mBgColor = fieldOf(iconColor, "mBgColor") ?: return
-  val mIsBgComplex = fieldOf(iconColor, "mIsBgComplex") ?: return
-  var hooked = 0
-  for (ctor in declaredConstructors(iconColor)) {
-    runCatching {
-      xposed.hook(ctor).intercept { chain ->
-        val result = chain.proceed(chain.args.toTypedArray())
-        runCatching {
-          if (mIsBgComplex.getBoolean(chain.thisObject)) return@runCatching
-          if (mBgColor.getInt(chain.thisObject) == 0) {
-            mIsBgComplex.setBoolean(chain.thisObject, true)
-          }
-        }
-        result
+      ?: run {
+        Log.w(TAG, "SplashScreen: IconColor class not found")
+        return
       }
-      hooked++
-    }
+  val mBgColor = fieldOf(iconColor, "mBgColor")
+  val mIsBgComplex = fieldOf(iconColor, "mIsBgComplex")
+  // 失败必须留痕：这里曾经静默 return，查了半天才发现是 ROM 侧类被削过。
+  if (mBgColor == null || mIsBgComplex == null) {
+    Log.w(TAG, "SplashScreen: fields not found, skip")
+    return
+  }
+  val ctors = declaredConstructors(iconColor)
+  var hooked = 0
+  var lastError: Throwable? = null
+  for (ctor in ctors) {
+    runCatching {
+        xposed.hook(ctor).intercept { chain ->
+          val result = chain.proceed(chain.args.toTypedArray())
+          runCatching {
+            if (mIsBgComplex.getBoolean(chain.thisObject)) return@runCatching
+            if (mBgColor.getInt(chain.thisObject) == 0) {
+              mIsBgComplex.setBoolean(chain.thisObject, true)
+            }
+          }
+          result
+        }
+        hooked++
+      }
+      .onFailure { lastError = it }
   }
   if (hooked > 0) Log.d(TAG, "SplashScreen: $hooked hooked")
+  else Log.w(TAG, "SplashScreen: ctors=${ctors.size} hooked=0 err=${lastError?.message}")
 }
 
 /**
@@ -656,7 +687,7 @@ private val nestedInfoFields by lazy {
     .mapNotNull { (className, fieldName) ->
       runCatching {
         val clazz = Class.forName(className)
-        clazz to clazz.getDeclaredField(fieldName).apply { isAccessible = true }
+        clazz to (fieldOf(clazz, fieldName) ?: throw NoSuchFieldException(fieldName))
       }
         .getOrNull()
     }
@@ -714,8 +745,21 @@ private fun classOf(name: String, classLoader: ClassLoader): Class<*>? =
 private fun firstClassOf(names: List<String>, classLoader: ClassLoader): Class<*>? =
   names.firstNotNullOfOrNull { classOf(it, classLoader) }
 
-private fun fieldOf(clazz: Class<*>, name: String) =
-  runCatching { clazz.getDeclaredField(name).apply { isAccessible = true } }.getOrNull()
+/**
+ * 按名字找字段，**沿父类链往上找**（与参考项目的 `field()` 一致）。
+ *
+ * ROM 侧的类是会被 R8 改写的：字段可能被挪到父类、方法可能被内联。只查本类
+ * `getDeclaredField` 会漏掉这些情况，而且漏掉时是**静默**的 —— 不报错、不打日志。
+ */
+private fun fieldOf(clazz: Class<*>, name: String): Field? {
+  var current: Class<*>? = clazz
+  while (current != null && current != Any::class.java) {
+    val found = runCatching { current!!.getDeclaredField(name) }.getOrNull()
+    if (found != null) return found.apply { isAccessible = true }
+    current = current.superclass
+  }
+  return null
+}
 
 private fun setIntField(obj: Any, name: String, value: Int) = runCatching {
   obj.javaClass.getDeclaredField(name).apply { isAccessible = true }.set(obj, value)
