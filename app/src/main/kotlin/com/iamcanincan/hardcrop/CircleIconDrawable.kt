@@ -10,7 +10,6 @@ import android.graphics.PorterDuff
 import android.graphics.PorterDuffXfermode
 import android.graphics.Rect
 import android.graphics.drawable.AdaptiveIconDrawable
-import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.Drawable
 
 /**
@@ -53,8 +52,23 @@ private val VIEW_PORT_SCALE = 1f / (1f + 2f * EXTRA_INSET_FRACTION)
 class CircleIconDrawable(icon: Drawable) :
   AdaptiveIconDrawable(
     RoundedIconDrawable(icon),
-    ColorDrawable(Color.TRANSPARENT),
+    RoundedIconDrawable(icon),
   ) {
+
+  /**
+   * 圆**同时放进 background 和 foreground 两层**。
+   *
+   * 原因：参考项目把图标放 foreground（背景透明），而我们实测这台机的 Settings
+   * 应用列表必须放 background 才显示 —— 说明不同页面取的层不一样：
+   * 只读 `getForeground()` 的页面拿到透明前景就什么都看不到，反之亦然。
+   * 两层放同一个圆后，无论页面读哪一层、还是调 `draw()`，拿到的都是圆。
+   *
+   * 两层画的是**同一个圆**（同心、同尺寸），所以叠在一起仍然是同一个圆；
+   * 图标本身不透明时完全没有差别。
+   */
+  private val sourceIcon: Drawable = icon
+
+  private val sourceState: ConstantState? = icon.constantState
 
   /**
    * **不调用 `super.draw()`** —— 这是能否在所有页面都显示成圆的关键。
@@ -79,13 +93,12 @@ class CircleIconDrawable(icon: Drawable) :
    * 副本必须是新实例，且仍然要是 [AdaptiveIconDrawable]（否则 launcher 又走 wrap 路径）。
    */
   override fun getConstantState(): ConstantState? {
-    val inner = background?.constantState
+    val src = sourceState
     // 同样**不能返回 null**：Launcher3 的 FloatingIconView 直接调
     // getConstantState().newDrawable()，null = NPE = 桌面进程崩。
-    // RoundedIconDrawable 已保证非 null，这里的兜底只是防止把 launcher 带崩。
+    // 拿不到 ConstantState 时退回复用同一个原图标，比返回 null 崩掉桌面好。
     return object : ConstantState() {
-      override fun newDrawable(): Drawable =
-        CircleIconDrawable(inner?.newDrawable() ?: ColorDrawable(Color.TRANSPARENT))
+      override fun newDrawable(): Drawable = CircleIconDrawable(src?.newDrawable() ?: sourceIcon)
 
       override fun getChangingConfigurations(): Int = changingConfigurations
     }
