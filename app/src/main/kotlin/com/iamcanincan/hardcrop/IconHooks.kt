@@ -21,10 +21,9 @@ import io.github.libxposed.api.XposedModuleInterface
 import java.lang.reflect.Constructor
 import java.lang.reflect.Field
 import java.lang.reflect.Method
-import java.util.concurrent.atomic.AtomicInteger
 import kotlin.concurrent.Volatile
 
-private const val TAG = "HardCrop"
+const val TAG = "HardCrop"
 
 // 应用资源 id 都住在 0x7f 这个 package 里。把图标 id 挪到一个不会有真实资源的 package，
 // 它到达 Resources 时就能被认出来；调用原方法之前会换回 0x7f，所以解析逻辑不受影响。
@@ -61,20 +60,6 @@ private val markingIcons = ThreadLocal.withInitial { false }
  */
 private val replacingIcon = ThreadLocal.withInitial { false }
 
-/**
- * 主通道（图标加载出口）每次取图标都会经过，日志**必须有上限** —— 刷一次应用列表就是上千次
- * 调用，全打出来会淹没 logcat 也会拖慢列表。每个进程只记前 [CLIP_LOG_LIMIT] 条，
- * 目的只是回答"这条通道到底跑没跑"，而不是审计每一次调用。
- */
-private const val CLIP_LOG_LIMIT = 30
-
-private val clipLogLeft = AtomicInteger(CLIP_LOG_LIMIT)
-
-private fun logClipOnce(site: String, icon: Drawable) {
-  if (clipLogLeft.decrementAndGet() >= 0) {
-    Log.d(TAG, "clip $site -> ${icon.javaClass.simpleName}")
-  }
-}
 
 private inline fun runMarkingIcons(block: () -> Unit) {
   if (markingIcons.get() == true) return
@@ -181,9 +166,7 @@ private fun hookIconLoader(xposed: XposedInterface, method: Method): Boolean =
           }
           val fallback =
             chain.proceed(args.toTypedArray()) as? Drawable ?: return@intercept null
-          return@intercept clipToCircle(fallback).also {
-            logClipOnce("default:${method.name}", it)
-          }
+          return@intercept clipToCircle(fallback)
         }
 
         // 已经在生成图标了（同一条调用链的内层），交给最外层处理。
@@ -195,7 +178,7 @@ private fun hookIconLoader(xposed: XposedInterface, method: Method): Boolean =
           val icon =
             chain.proceedWith(chain.thisObject, restored.toTypedArray()) as? Drawable
               ?: return@intercept null
-          clipToCircle(icon).also { logClipOnce(method.name, it) }
+          clipToCircle(icon)
         } finally {
           replacingIcon.set(false)
         }
@@ -235,10 +218,6 @@ private fun hookPackageManagerIconGetters(xposed: XposedInterface, classLoader: 
       runCatching {
         xposed.hook(method).intercept { chain ->
           val icon = chain.proceed(chain.args.toTypedArray()) as? Drawable ?: return@intercept null
-          val pkg = runCatching { chain.args.firstOrNull { it is String } as? String }.getOrNull()
-          if (pkg == "com.tencent.mobileqq" || pkg == "com.tencent.mm") {
-            Log.d(TAG, "PMGetter $name(${(chain.args.map { it?.javaClass?.simpleName }).joinToString()}) -> ${icon.javaClass.name} pkg=$pkg")
-          }
           clipToCircle(icon)
         }
         hooked++
