@@ -22,8 +22,10 @@ import io.github.libxposed.api.XposedModuleInterface
  * 写在里面的任何文字用户解包就能看到。字段说明一律放在本文件的 KDoc 或 README。
  *
  * ## 各字段的含义
- * - `staticScope=true`：作用域固定为 `scope.list` 里那 7 个进程，管理器拒绝勾选清单外的应用。
- *   模块只替换图标的加载结果，对没声明的进程没有任何作用，勾了只会误导。
+ * - `staticScope=false`：作用域**不固定**。`scope.list` 里的 10 个是推荐清单，用户可以在
+ *   管理器里额外勾选任意应用（第三方桌面、文件管理、带分享面板的应用等，只要它自己会画
+ *   别的应用的图标就有效）。早期写死成 `true` 会让清单外的应用永远拿不到模块 ——
+ *   这正是「覆盖不全」的根因，不是 hook 通道不够，而是那些进程根本没被注入。
  * - `autoHotReload=false`（框架默认值，显式写出来）：更新 APK 不会原地换 hook，
  *   改完代码必须重启目标进程。本模块 hook 的是 launcher / systemui 这类常驻进程，
  *   热加载会让新旧 hook 状态混在一起。

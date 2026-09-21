@@ -23,6 +23,8 @@ import androidx.compose.material.icons.filled.Dashboard
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Power
+import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
@@ -244,7 +246,7 @@ private fun SectionLabel(text: String) {
   )
 }
 
-/** 作用域清单：一张卡片里 7 行，每行 = 图标方块 + 标题 + 描述 + 标签。 */
+/** 作用域清单：一张卡片里 10 行，每行 = 图标方块 + 标题 + 描述 + 标签。 */
 @Composable
 private fun ScopeGroup() {
   val scopes =
@@ -254,6 +256,12 @@ private fun ScopeGroup() {
         R.string.scope_system_title,
         R.string.scope_system_desc,
         ScopeTag.RECOMMENDED,
+      ),
+      ScopeItem(
+        Icons.Default.Android,
+        R.string.scope_systemprocess_title,
+        R.string.scope_systemprocess_desc,
+        ScopeTag.OPTIONAL,
       ),
       ScopeItem(
         Icons.Default.Apps,
@@ -280,6 +288,12 @@ private fun ScopeGroup() {
         ScopeTag.RECOMMENDED,
       ),
       ScopeItem(
+        Icons.Default.Search,
+        R.string.scope_settings_intelligence_title,
+        R.string.scope_settings_intelligence_desc,
+        ScopeTag.OPTIONAL,
+      ),
+      ScopeItem(
         Icons.Default.Share,
         R.string.scope_intentresolver_title,
         R.string.scope_intentresolver_desc,
@@ -289,6 +303,12 @@ private fun ScopeGroup() {
         Icons.Default.Security,
         R.string.scope_permissioncontroller_title,
         R.string.scope_permissioncontroller_desc,
+        ScopeTag.OPTIONAL,
+      ),
+      ScopeItem(
+        Icons.Default.Schedule,
+        R.string.scope_wellbeing_title,
+        R.string.scope_wellbeing_desc,
         ScopeTag.OPTIONAL,
       ),
     )

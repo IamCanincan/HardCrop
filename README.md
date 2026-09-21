@@ -10,17 +10,21 @@
 
 1. 从 [Releases](https://github.com/IamCanincan/HardCrop/releases) 下载最新 APK 并安装
    （或按下面的「构建」自行编译）。
-2. 在 LSPosed 里启用模块。作用域由模块自己声明（`staticScope=true`），管理器里**只能**勾选
-   这 7 个进程，`scope.list` 之外的一个也加不进去 —— 想加别的应用会被框架直接拒绝：
+2. 在 LSPosed 里启用模块。作用域**不写死**（`staticScope=false`）：下面这 10 个是模块自带的
+   推荐清单，**任何会显示应用图标的应用都能在管理器里额外勾选** —— 第三方桌面、文件管理器、
+   带分享面板的社交应用等，只要它自己会画别的应用的图标，勾上就生效：
 
    ```
-   android                                 系统服务，解析应用信息
-   com.android.launcher3                   桌面与应用抽屉（类原生 ROM，必选）
-   com.google.android.apps.nexuslauncher   桌面与应用抽屉（Pixel / Nexus，必选）
-   com.android.systemui                    状态栏与最近任务
-   com.android.settings                    设置里的应用列表
-   com.android.intentresolver              分享与打开方式的选择列表
-   com.android.permissioncontroller        权限弹窗里的应用图标
+   android                                  系统服务，解析应用信息
+   system                                   系统进程，部分 ROM 在这里解析图标
+   com.android.launcher3                    桌面与应用抽屉（类原生 ROM，必选）
+   com.google.android.apps.nexuslauncher    桌面与应用抽屉（Pixel / Nexus，必选）
+   com.android.systemui                     状态栏与最近任务
+   com.android.settings                     设置里的应用列表
+   com.google.android.settings.intelligence 设置搜索与建议里的应用图标
+   com.android.intentresolver               分享与打开方式的选择列表
+   com.android.permissioncontroller         权限弹窗里的应用图标
+   com.google.android.apps.wellbeing        数字健康的应用使用列表
    ```
 
    两个桌面进程按 ROM 二选一即可：类原生 / AOSP 用 `com.android.launcher3`，
@@ -32,8 +36,9 @@
 > 作用域要覆盖所有会解析图标的进程。模块会给应用图标的资源 id 打标记，只有被标记的进程
 > 才认得这个标记；漏掉的进程会拿到无法解析的 id。
 >
-> 之所以把作用域写死：模块只替换图标的加载结果，对清单外的进程没有任何作用，
-> 让用户能勾选反而是一种误导。
+> 早期版本把作用域写死（`staticScope=true`），清单外的应用**永远**拿不到模块 —— 这正是
+> 「覆盖不全」的根因：不是 hook 通道不够，而是那些进程根本没被注入。现已改为
+> `staticScope=false`，任何应用都能自行勾选。
 
 ## 验证
 
@@ -104,18 +109,16 @@ Hooked com.android.settings
   `minApiVersion` 在框架侧不参与判断。
 - 只调用 `io.github.libxposed.api.*`。API 102 会屏蔽 legacy 的 `de.robv.android.xposed.*`，
   本模块没有任何 legacy 调用，dex 内也检索不到该包名；也不依赖 `hiddenapibypass`。
-- `staticScope=true`：作用域由 `META-INF/xposed/scope.list` 固定声明，管理器里只能勾选这
-  7 个进程。实测往里加别的应用会被框架直接拒绝：
+- `staticScope=false`：作用域**不固定**。`META-INF/xposed/scope.list` 里的 10 个是推荐清单，
+  用户可在管理器里额外勾选任意应用（第三方桌面、文件管理、带分享面板的应用等）。
+  早期版本写的是 `staticScope=true`，管理器会直接拒绝勾选清单外的应用：
 
   ```
   Error: com.iamcanincan.hardcrop fixes its scope in module.prop, so
-  com.iamcanincan.noticon cannot be added. It claims: android,
-  com.android.launcher3, com.google.android.apps.nexuslauncher,
-  com.android.systemui, com.android.settings, com.android.intentresolver,
-  com.android.permissioncontroller.
+  com.iamcanincan.noticon cannot be added. It claims: ...
   ```
 
-  这条报错就是判定静态作用域真正生效的依据。
+  正是这条限制造成「覆盖不全」，现已放开。
 - `autoHotReload=false`（框架默认值，显式写出）：改动代码后必须重启目标进程，框架不会热加载。
 - `exceptionMode=protective`（框架默认值，显式写出）：hook 里抛出的异常由框架吞掉，
   不让单个图标加载失败带崩 launcher / systemui —— 这两个都是常驻关键进程。

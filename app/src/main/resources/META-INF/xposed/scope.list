@@ -1,7 +1,10 @@
-android
-com.android.launcher3
-com.google.android.apps.nexuslauncher
-com.android.systemui
 com.android.settings
+com.google.android.settings.intelligence
+com.google.android.apps.nexuslauncher
+com.android.launcher3
+com.android.systemui
 com.android.intentresolver
 com.android.permissioncontroller
+android
+system
+com.google.android.apps.wellbeing

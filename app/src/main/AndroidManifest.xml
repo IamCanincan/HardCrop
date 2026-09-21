@@ -18,7 +18,7 @@
           - 模块名     -> android:label（@string/appName）
           - 模块描述   -> android:description（@string/xposed_description）
           - 作用域     -> META-INF/xposed/scope.list
-          - 模块配置   -> META-INF/xposed/module.prop（含 staticScope=true）
+          - 模块配置   -> META-INF/xposed/module.prop（含 staticScope=false）
         入口类在 META-INF/xposed/java_init.list。
 
         老式写法（xposedmodule / xposeddescription / xposedminversion 等 meta-data，

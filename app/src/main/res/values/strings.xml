@@ -24,16 +24,19 @@
 
     <!-- 作用域分组 -->
     <string name="section_scope">作用域</string>
-    <string name="scope_hint">模块在这些进程里替换图标的加载结果，漏掉的进程会拿到无法解析的资源 id。</string>
+    <string name="scope_hint">模块在这些进程里替换图标的加载结果。作用域不写死：任何会显示应用图标的应用都能在管理器里自行勾选；没勾上的进程会拿到无法解析的资源 id。</string>
 
     <!-- 作用域标签（3 种，多个作用域共享同一档位）-->
     <string name="scope_tag_required">必选</string>
     <string name="scope_tag_recommended">推荐</string>
     <string name="scope_tag_optional">可选</string>
 
-    <!-- 7 个作用域（标题 + 描述 + 标签档位）-->
+    <!-- 10 个推荐作用域（标题 + 描述 + 标签档位）-->
     <string name="scope_system_title">android（system_server）</string>
     <string name="scope_system_desc">系统服务，解析应用信息</string>
+
+    <string name="scope_systemprocess_title">system</string>
+    <string name="scope_systemprocess_desc">系统进程，部分 ROM 在这里解析图标</string>
 
     <string name="scope_launcher_title">com.android.launcher3</string>
     <string name="scope_launcher_desc">桌面与应用抽屉（类原生 ROM，效果最直观）</string>
@@ -47,11 +50,17 @@
     <string name="scope_settings_title">com.android.settings</string>
     <string name="scope_settings_desc">设置里的应用列表</string>
 
+    <string name="scope_settings_intelligence_title">com.google.android.settings.intelligence</string>
+    <string name="scope_settings_intelligence_desc">设置搜索与建议里出现的应用图标</string>
+
     <string name="scope_intentresolver_title">com.android.intentresolver</string>
     <string name="scope_intentresolver_desc">分享与打开方式的选择列表</string>
 
     <string name="scope_permissioncontroller_title">com.android.permissioncontroller</string>
     <string name="scope_permissioncontroller_desc">权限弹窗里的应用图标</string>
+
+    <string name="scope_wellbeing_title">com.google.android.apps.wellbeing</string>
+    <string name="scope_wellbeing_desc">数字健康的应用使用列表</string>
 
     <!-- 启用步骤 -->
     <string name="section_steps">启用步骤</string>
