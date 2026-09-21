@@ -4,6 +4,7 @@ import android.Manifest
 import android.accessibilityservice.AccessibilityServiceInfo
 import android.content.pm.ActivityInfo
 import android.content.pm.ApplicationInfo
+import android.content.pm.ComponentInfo
 import android.content.pm.LauncherApps
 import android.content.pm.PackageInfo
 import android.content.pm.PackageItemInfo
@@ -157,6 +158,11 @@ private fun hookIconLoader(xposed: XposedInterface, method: Method): Boolean =
       xposed.hook(method).intercept { chain ->
         val args = chain.args
 
+        // 已经在生成图标了（同一条调用链的内层），交给最外层处理。
+        // 参考项目把这道闸放在最前面 —— 默认图标那条分支同样要挡住，
+        // 否则嵌套时同一个图标会被裁两次。
+        if (replacingIcon.get() == true) return@intercept chain.proceed(args.toTypedArray())
+
         // 被标记的图标 id 是唯一认得出来的参数，找它比记住参数下标可靠。
         val index = args.indexOfFirst { (it as? Int)?.isMarkedIcon() == true }
         if (index < 0) {
@@ -169,8 +175,6 @@ private fun hookIconLoader(xposed: XposedInterface, method: Method): Boolean =
           return@intercept clipToCircle(fallback)
         }
 
-        // 已经在生成图标了（同一条调用链的内层），交给最外层处理。
-        if (replacingIcon.get() == true) return@intercept chain.proceed(args.toTypedArray())
         replacingIcon.set(true)
         try {
           val restored = args.toMutableList()
@@ -669,6 +673,14 @@ private fun markNestedInfo(info: Any) {
 private fun markIcon(info: PackageItemInfo) {
   // 快捷设置磁贴画的是小尺寸单色图形，不是应用图标。
   if (info is ServiceInfo && info.permission == Manifest.permission.BIND_QUICK_SETTINGS_TILE) return
+  markIconResId(info)
+  // 组件自己没声明图标时，系统会回退到 `applicationInfo.icon` —— 那个 id 走的是
+  // 同一条解析路径，也得打标记。参考项目的 `componentInfosTransform` 同样把这一层
+  // 一起处理（itemInfos + applicationInfo）；漏掉它，这类"图标为 0 的组件"就是方的。
+  if (info is ComponentInfo) info.applicationInfo?.let(::markIconResId)
+}
+
+private fun markIconResId(info: PackageItemInfo) {
   val icon = info.icon
   if (icon != 0 && icon.isAppResource()) info.icon = icon.marked()
 }
