@@ -16,9 +16,11 @@ import android.graphics.drawable.AdaptiveIconDrawable
 import android.graphics.drawable.Drawable
 import android.os.Build
 import android.os.Parcel
+import android.os.Process
 import android.util.Log
 import io.github.libxposed.api.XposedInterface
 import io.github.libxposed.api.XposedModuleInterface
+import java.io.File
 import java.lang.reflect.Constructor
 import java.lang.reflect.Field
 import java.lang.reflect.Method
@@ -107,6 +109,7 @@ private fun install(xposed: XposedInterface, classLoader: ClassLoader, packageNa
   if (packageName == "com.android.launcher3" ||
       packageName == "com.google.android.apps.nexuslauncher"
   ) {
+    invalidateIconCache(xposed, packageName)
     hookPixelLauncher(xposed, classLoader)
     hookTaskIcons(xposed, classLoader)
   }
@@ -117,6 +120,57 @@ private fun install(xposed: XposedInterface, classLoader: ClassLoader, packageNa
   }
 
   Log.d(TAG, "Hooked $packageName")
+}
+
+/**
+ * 模块生效后**自动清掉桌面自己的图标缓存**。
+ *
+ * launcher 把图标位图存在 `app_icons.db` 里，按**目标 App 的包名 + 版本**存 ——
+ * 我们模块升不升级跟它没关系。所以升级之后桌面看到的还是**上一版渲染出来的旧图**，
+ * 得手工删这个 DB 才会重新生成（bump 版本号也没用，见 MEMORY）。
+ *
+ * 这里在模块加载时对比**自己 APK 的戳**：变了就删一次。
+ * - 戳用「mtime + 体积」：APK 的 mtime 是安装时间，每次装都会变。
+ * - `onPackageReady` 发生在 `Application.attachBaseContext` 阶段，
+ *   **比 launcher 打开 IconCache 还早**，这时候删得掉。
+ * - 只删 `app_icons.db*`（图标缓存），**绝不碰** `launcher.db` / `launcher_4_by_5.db`
+ *   —— 那是桌面布局，删了图标排列就全没了。
+ * - 上次的戳记在 launcher 自己数据目录下的标记文件里：我们正以 launcher 的 UID 在跑，
+ *   读写它毫无障碍，而且能**跨 launcher 重启存活**（不像 `getRemotePreferences` 在本机
+ *   KernelSU + LSPosed 下不落盘）。这样保证"每个模块版本只清一次"，重启不会反复重建 17MB 缓存。
+ */
+private const val CACHE_STAMP_FILE = "hardcrop_cache_stamp"
+
+private fun invalidateIconCache(xposed: XposedInterface, packageName: String) {
+  val base = "/data/user/${Process.myUid() / 100000}/$packageName"
+  val stampFile = File("$base/files/$CACHE_STAMP_FILE")
+  val stamp =
+    runCatching {
+        File(xposed.moduleApplicationInfo.sourceDir).let { "${it.lastModified()}_${it.length()}" }
+      }
+      .getOrNull()
+  if (stamp == null) {
+    Log.w(TAG, "IconCache: cannot read module apk stamp")
+    return
+  }
+
+  // 已经清过这个版本了，跳过（避免每次 launcher 重启都重建 17MB 缓存）。
+  if (runCatching { stampFile.readText() }.getOrNull() == stamp) return
+
+  // 删缓存（按 launcher 的 UID 直接删它自己数据目录里的文件，不需要任何额外权限）。
+  val db = File("$base/databases/app_icons.db")
+  if (db.exists()) {
+    if (!runCatching { db.delete() }.getOrDefault(false)) {
+      Log.w(TAG, "IconCache: cannot delete ${db.path}")
+      return
+    }
+    for (suffix in listOf("-journal", "-wal", "-shm")) {
+      runCatching { File(db.path + suffix).delete() }
+    }
+    Log.d(TAG, "IconCache: invalidated, new stamp $stamp")
+  }
+  // 无论 DB 是否存在都记下戳，保证同版本只清一次。
+  runCatching { stampFile.parentFile?.mkdirs(); stampFile.writeText(stamp) }
 }
 
 /**
