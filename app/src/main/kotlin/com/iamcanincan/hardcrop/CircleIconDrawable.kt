@@ -10,6 +10,7 @@ import android.graphics.PorterDuff
 import android.graphics.PorterDuffXfermode
 import android.graphics.Rect
 import android.graphics.drawable.AdaptiveIconDrawable
+import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.Drawable
 
 /**
@@ -35,15 +36,15 @@ private val VIEW_PORT_SCALE = 1f / (1f + 2f * EXTRA_INSET_FRACTION)
  *
  * 要"和自适应图标一样"，必须走 adaptive 路径。
  *
- * ## 为什么两层都要放圆（这是关键，之前几次都栽在这）
- * launcher 按 adaptive 语义**只取 background / foreground 分别绘制**，它不会调用外层
- * 的 `draw()`。如果内容放在外层 `draw()` 里，launcher 只会画两个透明层 → 圆看不见。
+ * ## 为什么圆放在 foreground、背景保持透明
+ * 图标包的三件套是**前景（upon）/ 遮罩（mask）/ 背景（back）**，我们只要遮罩：
+ * 前景和背景两层都留空，形状完全由圆形遮罩决定 —— 不叠加任何装饰。
  *
- * 而放哪一层取决于页面：
- * - 只放 foreground（背景透明）→ Settings 应用列表空白（v2.5 实测）；
- * - 只放 background（前景透明）→ 只读 `getForeground()` 的页面什么都看不到。
+ * 落到 `AdaptiveIconDrawable` 上就是参考项目验证过的那种结构：
+ * **背景透明 + 前景 = 被圆形遮罩裁过的原图标**。
  *
- * 实测不同页面取的层不一样，所以**两层都放同一个圆**最稳（详见下一节）。
+ * 注意：内容**不能**放在外层的 `draw()` 里 —— launcher 按 adaptive 语义只取
+ * background / foreground 分别绘制，不会调用外层 `draw()`，放那里等于画两个透明层。
  *
  * ## 为什么形状由我们自己画，不看系统 mask
  * 实测这台机的 Settings 应用列表**不套系统 mask**，直绘整个 drawable —— 靠系统 mask
@@ -53,20 +54,15 @@ private val VIEW_PORT_SCALE = 1f / (1f + 2f * EXTRA_INSET_FRACTION)
  */
 class CircleIconDrawable(icon: Drawable) :
   AdaptiveIconDrawable(
-    RoundedIconDrawable(icon),
+    ColorDrawable(Color.TRANSPARENT),
     RoundedIconDrawable(icon),
   ) {
 
   /**
-   * 圆**同时放进 background 和 foreground 两层**。
+   * 原图标留一份引用，只为了 [getConstantState] 能重建出副本。
    *
-   * 原因：参考项目把图标放 foreground（背景透明），而我们实测这台机的 Settings
-   * 应用列表必须放 background 才显示 —— 说明不同页面取的层不一样：
-   * 只读 `getForeground()` 的页面拿到透明前景就什么都看不到，反之亦然。
-   * 两层放同一个圆后，无论页面读哪一层、还是调 `draw()`，拿到的都是圆。
-   *
-   * 两层画的是**同一个圆**（同心、同尺寸），所以叠在一起仍然是同一个圆；
-   * 图标本身不透明时完全没有差别。
+   * 圆本身住在 **foreground 层**（[RoundedIconDrawable]），背景是透明的；
+   * 外层 [draw] 因此也画 foreground。
    */
   private val sourceIcon: Drawable = icon
 
@@ -87,8 +83,9 @@ class CircleIconDrawable(icon: Drawable) :
    * 不经过任何系统 mask。
    */
   override fun draw(canvas: Canvas) {
-    val bg = background
-    if (bg == null) super.draw(canvas) else bg.draw(canvas)
+    // 背景是透明的，画它等于什么都没画 —— 圆在前景层。
+    val fg = foreground
+    if (fg == null) super.draw(canvas) else fg.draw(canvas)
   }
 
   /**

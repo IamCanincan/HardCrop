@@ -22,8 +22,8 @@ extensions.configure<ApplicationExtension> {
     applicationId = "com.iamcanincan.hardcrop"
     minSdk = 27
     targetSdk = 37
-    versionCode = 5
-    versionName = "1.0.5"
+    versionCode = 6
+    versionName = "1.0.6"
   }
 
   buildTypes {
