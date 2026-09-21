@@ -1,6 +1,7 @@
 package com.iamcanincan.hardcrop
 
 import android.Manifest
+import android.accessibilityservice.AccessibilityServiceInfo
 import android.content.pm.ActivityInfo
 import android.content.pm.ApplicationInfo
 import android.content.pm.LauncherApps
@@ -17,6 +18,7 @@ import android.util.Log
 import io.github.libxposed.api.XposedInterface
 import io.github.libxposed.api.XposedModuleInterface
 import java.lang.reflect.Constructor
+import java.lang.reflect.Field
 import java.lang.reflect.Method
 import kotlin.concurrent.Volatile
 
@@ -208,6 +210,18 @@ private fun hookMarkedIconIds(xposed: XposedInterface) {
       xposed.hook(ctor).intercept { chain ->
         val result = chain.proceed(chain.args.toTypedArray())
         runMarkingIcons { markResolveInfo(chain.thisObject as? ResolveInfo) }
+        result
+      }
+    }
+  }
+
+  // PackageInfo 里的 applicationInfo / activities 等字段多数是构造之后才填的，
+  // 但"构造完立刻用"的场合也有，先打一遍。批量通道里还会再打一次。
+  for (ctor in declaredConstructors(PackageInfo::class.java)) {
+    runCatching {
+      xposed.hook(ctor).intercept { chain ->
+        val result = chain.proceed(chain.args.toTypedArray())
+        markInfo(chain.thisObject as? PackageInfo)
         result
       }
     }
@@ -466,7 +480,49 @@ private fun markInfo(info: Any?) {
       }
     is PackageItemInfo -> runMarkingIcons { markIcon(info) }
     is ResolveInfo -> runMarkingIcons { markResolveInfo(info) }
-    else -> Unit
+    // 无障碍服务列表：服务信息藏在 resolveInfo 里
+    is AccessibilityServiceInfo -> runMarkingIcons { markResolveInfo(info.resolveInfo) }
+    else -> {
+      if (info == null) return
+      runMarkingIcons { markNestedInfo(info) }
+    }
+  }
+}
+
+/**
+ * 外层对象本身不是 `PackageItemInfo`、图标信息**藏在字段里**的那些类型。
+ *
+ * 只按外层类型判断的话，这些列表一个都覆盖不到 —— 最近任务、冷启动 splash
+ * 传的正是这类对象：
+ * - `TaskInfo.topActivityInfo`：`RunningTaskInfo` / `RecentTaskInfo` 都继承它
+ *   （最近任务 / 概览 / 分屏选择器）
+ * - `LaunchActivityItem.mInfo`：启动 Activity 时带的那份 `ActivityInfo`，
+ *   **冷启动 splash 屏上的图标就是从这里来的**
+ * - `LauncherActivityInfoInternal.mActivityInfo`：`LauncherApps` 内部传递用
+ *
+ * 一律用"类名字符串 + 反射字段"取，不写 `is TaskInfo` 这种直接引用 ——
+ * 这些类在旧版本设备上不存在，直接引用会在类加载时炸掉。
+ */
+private val nestedInfoFields by lazy {
+  listOf(
+      "android.app.TaskInfo" to "topActivityInfo",
+      "android.app.servertransaction.LaunchActivityItem" to "mInfo",
+      "android.content.pm.LauncherActivityInfoInternal" to "mActivityInfo",
+    )
+    .mapNotNull { (className, fieldName) ->
+      runCatching {
+        val clazz = Class.forName(className)
+        clazz to clazz.getDeclaredField(fieldName).apply { isAccessible = true }
+      }
+        .getOrNull()
+    }
+}
+
+private fun markNestedInfo(info: Any) {
+  for ((clazz, field) in nestedInfoFields) {
+    if (!clazz.isInstance(info)) continue
+    val inner = runCatching { field.get(info) }.getOrNull() ?: continue
+    markInfo(inner)
   }
 }
 
