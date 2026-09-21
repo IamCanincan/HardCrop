@@ -21,6 +21,7 @@ import io.github.libxposed.api.XposedModuleInterface
 import java.lang.reflect.Constructor
 import java.lang.reflect.Field
 import java.lang.reflect.Method
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.concurrent.Volatile
 
 private const val TAG = "HardCrop"
@@ -59,6 +60,21 @@ private val markingIcons = ThreadLocal.withInitial { false }
  * 有时大有时小"。
  */
 private val replacingIcon = ThreadLocal.withInitial { false }
+
+/**
+ * 主通道（图标加载出口）每次取图标都会经过，日志**必须有上限** —— 刷一次应用列表就是上千次
+ * 调用，全打出来会淹没 logcat 也会拖慢列表。每个进程只记前 [CLIP_LOG_LIMIT] 条，
+ * 目的只是回答"这条通道到底跑没跑"，而不是审计每一次调用。
+ */
+private const val CLIP_LOG_LIMIT = 30
+
+private val clipLogLeft = AtomicInteger(CLIP_LOG_LIMIT)
+
+private fun logClipOnce(site: String, icon: Drawable) {
+  if (clipLogLeft.decrementAndGet() >= 0) {
+    Log.d(TAG, "clip $site -> ${icon.javaClass.simpleName}")
+  }
+}
 
 private inline fun runMarkingIcons(block: () -> Unit) {
   if (markingIcons.get() == true) return
@@ -163,8 +179,11 @@ private fun hookIconLoader(xposed: XposedInterface, method: Method): Boolean =
           if (args.indexOfFirst { (it as? Int) == DEFAULT_APP_ICON } < 0) {
             return@intercept chain.proceed(args.toTypedArray())
           }
-          val fallback = chain.proceed(args.toTypedArray()) as? Drawable
-          return@intercept if (fallback == null) null else clipToCircle(fallback)
+          val fallback =
+            chain.proceed(args.toTypedArray()) as? Drawable ?: return@intercept null
+          return@intercept clipToCircle(fallback).also {
+            logClipOnce("default:${method.name}", it)
+          }
         }
 
         // 已经在生成图标了（同一条调用链的内层），交给最外层处理。
@@ -175,7 +194,8 @@ private fun hookIconLoader(xposed: XposedInterface, method: Method): Boolean =
           restored[index] = (args[index] as Int).unmarked()
           val icon =
             chain.proceedWith(chain.thisObject, restored.toTypedArray()) as? Drawable
-          if (icon == null) null else clipToCircle(icon)
+              ?: return@intercept null
+          clipToCircle(icon).also { logClipOnce(method.name, it) }
         } finally {
           replacingIcon.set(false)
         }
