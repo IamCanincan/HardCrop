@@ -35,13 +35,15 @@ private val VIEW_PORT_SCALE = 1f / (1f + 2f * EXTRA_INSET_FRACTION)
  *
  * 要"和自适应图标一样"，必须走 adaptive 路径。
  *
- * ## 为什么实际内容要放在 background 层（这是关键，之前几次都栽在这）
+ * ## 为什么两层都要放圆（这是关键，之前几次都栽在这）
  * launcher 按 adaptive 语义**只取 background / foreground 分别绘制**，它不会调用外层
  * 的 `draw()`。如果内容放在外层 `draw()` 里，launcher 只会画两个透明层 → 圆看不见。
- * 也不能放在 foreground：foreground 是透明层，且部分页面（如 Settings 应用列表）直绘
- * 整个 drawable 时只把"非透明层"渲染出来，放 foreground 等于没有圆。
  *
- * 所以：**内容放 background 层**（[RoundedIconDrawable]），foreground 保持透明。
+ * 而放哪一层取决于页面：
+ * - 只放 foreground（背景透明）→ Settings 应用列表空白（v2.5 实测）；
+ * - 只放 background（前景透明）→ 只读 `getForeground()` 的页面什么都看不到。
+ *
+ * 实测不同页面取的层不一样，所以**两层都放同一个圆**最稳（详见下一节）。
  *
  * ## 为什么形状由我们自己画，不看系统 mask
  * 实测这台机的 Settings 应用列表**不套系统 mask**，直绘整个 drawable —— 靠系统 mask
