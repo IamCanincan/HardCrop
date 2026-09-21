@@ -35,4 +35,14 @@
         换来的只是少一条无害的字节码警告，不划算。
     -->
     <issue id="SyntheticAccessor" severity="ignore" />
+
+    <!--
+        模块拿宿主进程的 Context 只能反射 `ActivityThread.currentApplication()`：
+        libxposed 的 API（PackageReadyParam / PackageLoadedParam）只给了 packageName、
+        applicationInfo 和 classLoader，**没有任何 Context**，而注册广播接收器必须要它。
+        这是 Xposed 模块侧的通用做法，风险由「拿不到就只是少一个手动按钮」兜住
+        （见 IconHooks.hookProcessControlReceiver：拿不到只打一条日志，不影响裁圆）。
+    -->
+    <issue id="PrivateApi" severity="ignore" />
+    <issue id="DiscouragedPrivateApi" severity="ignore" />
 </lint>

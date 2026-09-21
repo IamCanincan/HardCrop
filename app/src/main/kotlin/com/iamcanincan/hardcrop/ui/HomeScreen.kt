@@ -1,5 +1,6 @@
 package com.iamcanincan.hardcrop.ui
 
+import android.content.Intent
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,11 +19,13 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.Android
 import androidx.compose.material.icons.filled.Apps
+import androidx.compose.material.icons.filled.CleaningServices
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Dashboard
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Power
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Security
@@ -63,6 +66,8 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.iamcanincan.hardcrop.ACTION_CLEAR_ICON_CACHE
+import com.iamcanincan.hardcrop.ACTION_RESTART_SELF
 import com.iamcanincan.hardcrop.BuildConfig
 import com.iamcanincan.hardcrop.R
 import com.iamcanincan.hardcrop.update.UpdateChecker
@@ -71,6 +76,20 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 private const val REPO_URL = "https://github.com/IamCanincan/HardCrop"
+
+/** 桌面包名（类原生 / Pixel 两套），发广播点名用。 */
+private const val LAUNCHER_AOSP = "com.android.launcher3"
+private const val LAUNCHER_PIXEL = "com.google.android.apps.nexuslauncher"
+private const val SYSTEMUI = "com.android.systemui"
+
+/** 「重启其他」覆盖的进程：都是会显示别的应用图标、杀掉后系统会自动拉起的 UI 进程。 */
+private val OTHER_RESTARTABLE =
+  listOf(
+    "com.android.settings",
+    "com.google.android.settings.intelligence",
+    "com.android.intentresolver",
+    "com.android.permissioncontroller",
+  )
 
 @Composable
 fun HomeScreen() {
@@ -98,6 +117,9 @@ fun HomeScreen() {
 
       item { SectionLabel(text = stringResource(R.string.section_verify)) }
       item { VerifyCard(snackbarHostState) }
+
+      item { SectionLabel(text = stringResource(R.string.section_tools)) }
+      item { ToolsCard(snackbarHostState) }
 
       item { SectionLabel(text = stringResource(R.string.section_notes)) }
       item { NotesCard() }
@@ -513,6 +535,121 @@ private fun VerifyCard(snackbarHostState: SnackbarHostState) {
           }
         }
       }
+    }
+  }
+}
+
+/**
+ * 运维操作卡：清缓存 / 重启 SystemUI / 重启其他进程。
+ *
+ * 删除和重启都由**目标进程里的模块**执行 —— App 这里只是发一条广播点名，
+ * 所以不需要 root，也不会执行任何 shell 命令。
+ */
+@Composable
+private fun ToolsCard(snackbarHostState: SnackbarHostState) {
+  val context = LocalContext.current
+  val cacheSent = stringResource(R.string.cache_sent)
+  val restartSent = stringResource(R.string.restart_sent)
+  val scope = rememberCoroutineScope()
+
+  ElevatedCard(shape = MaterialTheme.shapes.large) {
+    Column(modifier = Modifier.padding(16.dp)) {
+      Row(verticalAlignment = Alignment.CenterVertically) {
+        Surface(
+          shape = RoundedCornerShape(12.dp),
+          color = MaterialTheme.colorScheme.tertiaryContainer,
+          modifier = Modifier.size(40.dp),
+        ) {
+          Box(contentAlignment = Alignment.Center) {
+            Icon(
+              imageVector = Icons.Default.CleaningServices,
+              contentDescription = null,
+              tint = MaterialTheme.colorScheme.onTertiaryContainer,
+              modifier = Modifier.size(22.dp),
+            )
+          }
+        }
+        Spacer(modifier = Modifier.width(14.dp))
+        Text(
+          text = stringResource(R.string.cache_title),
+          style = MaterialTheme.typography.titleSmall,
+          color = MaterialTheme.colorScheme.onSurface,
+        )
+      }
+
+      Spacer(modifier = Modifier.height(12.dp))
+      Text(
+        text = stringResource(R.string.cache_body),
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+      )
+
+      Spacer(modifier = Modifier.height(12.dp))
+      Button(
+        onClick = {
+          // 桌面进程里注册的是动态接收器，隐式广播送得到；
+          // 再显式点两个已知桌面的包名，双保险（重复送达无害：第二次 DB 已经不存在了）。
+          runCatching {
+            context.sendBroadcast(Intent(ACTION_CLEAR_ICON_CACHE))
+            context.sendBroadcast(Intent(ACTION_CLEAR_ICON_CACHE).setPackage(LAUNCHER_AOSP))
+            context.sendBroadcast(Intent(ACTION_CLEAR_ICON_CACHE).setPackage(LAUNCHER_PIXEL))
+          }
+          scope.launch { snackbarHostState.showSnackbar(cacheSent) }
+        },
+        modifier = Modifier.fillMaxWidth(),
+      ) {
+        Icon(
+          imageVector = Icons.Default.Refresh,
+          contentDescription = null,
+          modifier = Modifier.size(18.dp),
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        Text(text = stringResource(R.string.action_clear_launcher))
+      }
+
+      Spacer(modifier = Modifier.height(16.dp))
+      Text(
+        text = stringResource(R.string.tools_body),
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+      )
+
+      Spacer(modifier = Modifier.height(12.dp))
+      Row(modifier = Modifier.fillMaxWidth()) {
+        OutlinedButton(
+          onClick = {
+            runCatching {
+              context.sendBroadcast(Intent(ACTION_RESTART_SELF).setPackage(SYSTEMUI))
+            }
+            scope.launch { snackbarHostState.showSnackbar(restartSent) }
+          },
+          modifier = Modifier.weight(1f),
+        ) {
+          Text(text = stringResource(R.string.action_restart_systemui))
+        }
+        Spacer(modifier = Modifier.width(10.dp))
+        OutlinedButton(
+          onClick = {
+            // 其余会画别的应用图标的进程。杀掉后系统会把它们拉起来，下次用到时重新注入。
+            runCatching {
+              for (pkg in OTHER_RESTARTABLE) {
+                context.sendBroadcast(Intent(ACTION_RESTART_SELF).setPackage(pkg))
+              }
+            }
+            scope.launch { snackbarHostState.showSnackbar(restartSent) }
+          },
+          modifier = Modifier.weight(1f),
+        ) {
+          Text(text = stringResource(R.string.action_restart_others))
+        }
+      }
+
+      Spacer(modifier = Modifier.height(10.dp))
+      Text(
+        text = stringResource(R.string.tools_hint),
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+      )
     }
   }
 }

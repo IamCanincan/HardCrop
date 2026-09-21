@@ -80,6 +80,19 @@
     <string name="verify_copy">复制命令</string>
     <string name="verify_copied">已复制到剪贴板</string>
 
+    <!-- 运维操作：清缓存 / 重启进程（全部由模块在目标进程内部执行，不需要 root） -->
+    <string name="section_tools">运维操作</string>
+    <string name="tools_body">下面这些操作全部由模块在目标进程内部完成（删自己的缓存、重启自己），不需要 root，也不会执行任何 shell 命令。</string>
+    <string name="cache_title">清除桌面图标缓存</string>
+    <string name="cache_body">桌面把图标位图缓存在自己的数据库里，而且只按“目标 App 的版本”更新 —— 所以本模块升级之后，桌面可能仍旧显示上一版渲染出来的图。点下面的按钮删掉缓存并重启桌面，图标会按当前逻辑重新生成。</string>
+    <string name="action_clear_launcher">清除缓存并重启桌面</string>
+    <string name="action_restart_systemui">重启 SystemUI</string>
+    <string name="action_restart_others">重启其他进程</string>
+    <string name="cache_sent">已发送：桌面即将重启并重建图标</string>
+    <string name="restart_sent">已发送：目标进程即将重启</string>
+    <string name="tools_hint">模块不会自动清理：什么时候清由你决定，一般只在桌面图标没跟上变化时才需要点。
+        点了没反应 = 那个进程没有注入本模块（回上面确认 LSPosed 里勾选过，并重启过设备）。</string>
+
     <!-- 说明 -->
     <string name="section_notes">说明</string>
     <string name="note_adaptive">自适应图标也会被强制裁成圆形：系统给它的形状（圆角方、水滴等）不一定是圆。</string>

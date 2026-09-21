@@ -2,6 +2,12 @@ package com.iamcanincan.hardcrop
 
 import android.Manifest
 import android.accessibilityservice.AccessibilityServiceInfo
+import android.annotation.SuppressLint
+import android.app.Application
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.ActivityInfo
 import android.content.pm.ApplicationInfo
 import android.content.pm.ComponentInfo
@@ -15,6 +21,8 @@ import android.content.res.Resources
 import android.graphics.drawable.AdaptiveIconDrawable
 import android.graphics.drawable.Drawable
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.os.Parcel
 import android.os.Process
 import android.util.Log
@@ -112,11 +120,12 @@ private fun install(xposed: XposedInterface, classLoader: ClassLoader, packageNa
   hookShortcutIcons(xposed)
   hookArchivedAppIcon(xposed, classLoader)
   hookPackageManagerIconGetters(xposed, classLoader)
+  // 进程控制（清缓存 / 重启自己）：内部按白名单过滤，只有安全的 UI 进程才挂。
+  hookProcessControlReceiver(packageName)
 
   if (packageName == "com.android.launcher3" ||
       packageName == "com.google.android.apps.nexuslauncher"
   ) {
-    invalidateIconCache(xposed, packageName)
     hookPixelLauncher(xposed, classLoader)
     hookTaskIcons(xposed, classLoader)
   }
@@ -129,55 +138,161 @@ private fun install(xposed: XposedInterface, classLoader: ClassLoader, packageNa
   Log.d(TAG, "Hooked $packageName")
 }
 
-/**
- * 模块生效后**自动清掉桌面自己的图标缓存**。
- *
- * launcher 把图标位图存在 `app_icons.db` 里，按**目标 App 的包名 + 版本**存 ——
- * 我们模块升不升级跟它没关系。所以升级之后桌面看到的还是**上一版渲染出来的旧图**，
- * 得手工删这个 DB 才会重新生成（bump 版本号也没用，见 MEMORY）。
- *
- * 这里在模块加载时对比**自己 APK 的戳**：变了就删一次。
- * - 戳用「mtime + 体积」：APK 的 mtime 是安装时间，每次装都会变。
- * - `onPackageReady` 发生在 `Application.attachBaseContext` 阶段，
- *   **比 launcher 打开 IconCache 还早**，这时候删得掉。
- * - 只删 `app_icons.db*`（图标缓存），**绝不碰** `launcher.db` / `launcher_4_by_5.db`
- *   —— 那是桌面布局，删了图标排列就全没了。
- * - 上次的戳记在 launcher 自己数据目录下的标记文件里：我们正以 launcher 的 UID 在跑，
- *   读写它毫无障碍，而且能**跨 launcher 重启存活**（不像 `getRemotePreferences` 在本机
- *   KernelSU + LSPosed 下不落盘）。这样保证"每个模块版本只清一次"，重启不会反复重建 17MB 缓存。
- */
-private const val CACHE_STAMP_FILE = "hardcrop_cache_stamp"
+/** 手动"清图标缓存并重启桌面"的广播 action：App 发出，桌面进程里的本模块接收。 */
+const val ACTION_CLEAR_ICON_CACHE = "com.iamcanincan.hardcrop.CLEAR_ICON_CACHE"
 
-private fun invalidateIconCache(xposed: XposedInterface, packageName: String) {
-  val base = "/data/user/${Process.myUid() / 100000}/$packageName"
-  val stampFile = File("$base/files/$CACHE_STAMP_FILE")
-  val stamp =
-    runCatching {
-        File(xposed.moduleApplicationInfo.sourceDir).let { "${it.lastModified()}_${it.length()}" }
-      }
-      .getOrNull()
-  if (stamp == null) {
-    Log.w(TAG, "IconCache: cannot read module apk stamp")
+/** 手动"重启自己"的广播 action：App 按包名点名，对应进程里的本模块收到后自杀重启。 */
+const val ACTION_RESTART_SELF = "com.iamcanincan.hardcrop.RESTART_SELF"
+
+/**
+ * 允许响应"重启自己"的进程白名单。
+ *
+ * 这些都是普通 UI 进程：杀掉之后系统会立刻把它们拉起来，对用户没有副作用
+ * （桌面闪一下、状态栏重建一下就完事）。
+ *
+ * ⚠ **绝不能放进 `system` / `system_server`** —— 杀它们等于软重启整机，
+ * 用户只是想刷个图标，不该把整台手机重启一遍。
+ */
+private val RESTARTABLE_PACKAGES =
+  setOf(
+    "com.android.launcher3",
+    "com.google.android.apps.nexuslauncher",
+    "com.android.systemui",
+    "com.android.settings",
+    "com.google.android.settings.intelligence",
+    "com.android.intentresolver",
+    "com.android.permissioncontroller",
+    "com.google.android.apps.wellbeing",
+  )
+
+/** 桌面进程。清缓存只在这两个里做 —— 别把别的进程的数据库给删了。 */
+private fun isLauncher(packageName: String) =
+  packageName == "com.android.launcher3" ||
+    packageName == "com.google.android.apps.nexuslauncher"
+
+/**
+ * 桌面自己数据目录的根路径。
+ *
+ * 我们是**跑在桌面进程里**的，用的是桌面的 UID，所以它自己目录下的文件随便读写，
+ * 不需要任何额外权限（也不该去申请）。
+ */
+private fun launcherDataDir(packageName: String): String =
+  "/data/user/${Process.myUid() / 100000}/$packageName"
+
+/**
+ * 删掉桌面的图标缓存 `app_icons.db*`。
+ *
+ * **只删图标缓存**，绝不碰 `launcher.db` / `launcher_4_by_5.db` —— 那是桌面布局，
+ * 删了图标排列就全没了。
+ *
+ * @return 真删掉了返回 true；DB 本来就不存在返回 false（这不算失败）。
+ */
+private fun deleteIconCache(packageName: String): Boolean {
+  val db = File("${launcherDataDir(packageName)}/databases/app_icons.db")
+  if (!db.exists()) return false
+  if (!runCatching { db.delete() }.getOrDefault(false)) {
+    Log.w(TAG, "IconCache: cannot delete ${db.path}")
+    return false
+  }
+  for (suffix in listOf("-journal", "-wal", "-shm")) {
+    runCatching { File(db.path + suffix).delete() }
+  }
+  return true
+}
+
+// 这里原本有一套"模块加载时按 APK 戳记自动清一次图标缓存"的逻辑，已经**按用户要求移除**：
+// 清不清、什么时候清一律交给界面上的手动按钮，模块不再自作主张删桌面的数据库。
+// 手动清的实现见 [deleteIconCache] 与广播 [ACTION_CLEAR_ICON_CACHE]。
+
+/**
+ * 注册"进程控制"广播接收器：让 App 能请求**清缓存** / **重启本进程**。
+ *
+ * **为什么要绕这一圈**：App 自己进程的 UID **读不到**桌面（launcher3）的数据目录，
+ * 也杀不掉别的进程（要 root 或 shell 才行）。而本模块是跑在**目标进程里**的，
+ * 用的是那个进程自己的 UID —— 删自己的文件、自杀重启，全都名正言顺，
+ * **不需要 root，也不用执行任何 shell 命令**（参考项目这一排按钮是走 root shell 的）。
+ *
+ * **为什么清完缓存必须重启桌面**：桌面把图标位图缓存在**内存**里，只删 DB 它不会重新读盘，
+ * 用户看到的还是旧图 —— 这正是"清了缓存却没变化"的根因。杀掉进程让系统把它拉起来，
+ * 才会真正按当前逻辑重建图标。
+ */
+/** 当前进程的 Application（模块侧拿 Context 的通用办法，反射 ActivityThread）。 */
+private fun currentApplication(): Application? =
+  runCatching {
+      val activityThread = Class.forName("android.app.ActivityThread")
+      val method = activityThread.getDeclaredMethod("currentApplication")
+      method.isAccessible = true
+      method.invoke(null) as? Application
+    }
+    .getOrNull()
+
+private fun hookProcessControlReceiver(packageName: String) {
+  if (packageName !in RESTARTABLE_PACKAGES) return
+
+  // 我们还在 attachBaseContext 阶段，`ActivityThread.currentApplication()` 这时常常是 null。
+  // 先试一次，拿不到就起个线程等它就绪 —— 这比 hook `Application.onCreate` 可靠得多：
+  // 子类里的 `super.onCreate()` 会被内联进子类，hook 基类方法根本不会被走到
+  // （deoptimize 也救不回来：实测注册“成功”但一次都没触发）。
+  val app = currentApplication()
+  if (app != null) {
+    registerProcessControlReceiver(app, packageName)
     return
   }
 
-  // 已经清过这个版本了，跳过（避免每次 launcher 重启都重建 17MB 缓存）。
-  if (runCatching { stampFile.readText() }.getOrNull() == stamp) return
+  Thread {
+      var ready: Application? = null
+      for (i in 0 until 100) {
+        ready = currentApplication()
+        if (ready != null) break
+        runCatching { Thread.sleep(100) }
+      }
+      if (ready == null) {
+        Log.w(TAG, "ProcessControl: no Application in $packageName, receiver not registered")
+        return@Thread
+      }
+      Handler(Looper.getMainLooper()).post { registerProcessControlReceiver(ready, packageName) }
+    }
+    .apply { isDaemon = true }
+    .start()
+}
 
-  // 删缓存（按 launcher 的 UID 直接删它自己数据目录里的文件，不需要任何额外权限）。
-  val db = File("$base/databases/app_icons.db")
-  if (db.exists()) {
-    if (!runCatching { db.delete() }.getOrDefault(false)) {
-      Log.w(TAG, "IconCache: cannot delete ${db.path}")
-      return
+// lint 看不出"高版本走带 flag 的重载"这个分支，只盯着旧版那条无 flag 的调用。
+// 实际上 flag 已经按 SDK 版本给了，这里精准抑制即可（比在 lint.xml 里全局关掉好）。
+@SuppressLint("UnspecifiedRegisterReceiverFlag")
+private fun registerProcessControlReceiver(context: Context, packageName: String) {
+  val receiver =
+    object : BroadcastReceiver() {
+      override fun onReceive(ctx: Context, intent: Intent?) {
+        when (intent?.action) {
+          ACTION_CLEAR_ICON_CACHE -> {
+            // 只有桌面进程执行：删的是"自己"的图标缓存，别的进程别跟着删。
+            if (!isLauncher(packageName)) {
+              Log.w(TAG, "ProcessControl: clear request ignored in $packageName")
+              return
+            }
+            val deleted = deleteIconCache(packageName)
+            Log.d(TAG, "CacheClear: manual request, db deleted=$deleted, restarting launcher")
+            Process.killProcess(Process.myPid())
+          }
+          ACTION_RESTART_SELF -> {
+            Log.d(TAG, "Restart: manual request, restarting $packageName")
+            Process.killProcess(Process.myPid())
+          }
+          else -> Log.w(TAG, "ProcessControl: unknown action ${intent?.action}")
+        }
+      }
     }
-    for (suffix in listOf("-journal", "-wal", "-shm")) {
-      runCatching { File(db.path + suffix).delete() }
+  val filter =
+    IntentFilter().apply {
+      addAction(ACTION_CLEAR_ICON_CACHE)
+      addAction(ACTION_RESTART_SELF)
     }
-    Log.d(TAG, "IconCache: invalidated, new stamp $stamp")
+  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+    context.registerReceiver(receiver, filter, Context.RECEIVER_EXPORTED)
+  } else {
+    context.registerReceiver(receiver, filter)
   }
-  // 无论 DB 是否存在都记下戳，保证同版本只清一次。
-  runCatching { stampFile.parentFile?.mkdirs(); stampFile.writeText(stamp) }
+  Log.d(TAG, "ProcessControl: receiver registered in $packageName")
 }
 
 /**
