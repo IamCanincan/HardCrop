@@ -3,8 +3,8 @@ package com.iamcanincan.hardcrop
 import android.Manifest
 import android.content.pm.ActivityInfo
 import android.content.pm.ApplicationInfo
-import android.content.pm.ComponentInfo
 import android.content.pm.LauncherApps
+import android.content.pm.PackageInfo
 import android.content.pm.PackageItemInfo
 import android.content.pm.ProviderInfo
 import android.content.pm.ResolveInfo
@@ -12,11 +12,13 @@ import android.content.pm.ServiceInfo
 import android.content.res.Resources
 import android.graphics.drawable.Drawable
 import android.os.Build
+import android.os.Parcel
 import android.util.Log
 import io.github.libxposed.api.XposedInterface
 import io.github.libxposed.api.XposedModuleInterface
 import java.lang.reflect.Constructor
 import java.lang.reflect.Method
+import kotlin.concurrent.Volatile
 
 private const val TAG = "HardCrop"
 
@@ -24,6 +26,9 @@ private const val TAG = "HardCrop"
 // 它到达 Resources 时就能被认出来；调用原方法之前会换回 0x7f，所以解析逻辑不受影响。
 private const val REAL_PACKAGE_ID = 0x7f000000
 private const val MARKED_PACKAGE_ID = 0x6e000000
+
+// 应用图标解析不出来时系统用的那个默认图标，它同样不是圆形的。
+private const val DEFAULT_APP_ICON = android.R.drawable.sym_def_app_icon
 
 private fun Int.isMarkedIcon() = (this and 0xff000000.toInt()) == MARKED_PACKAGE_ID
 
@@ -33,31 +38,292 @@ private fun Int.unmarked() = (this and 0x00ffffff) or REAL_PACKAGE_ID
 
 private fun Int.isAppResource() = (this and 0xff000000.toInt()) == REAL_PACKAGE_ID
 
-fun hookIcons(xposed: XposedInterface, param: XposedModuleInterface.PackageReadyParam) {
-  Log.d(TAG, "onPackageReady ${param.packageName}, sdk ${Build.VERSION.SDK_INT}")
+/**
+ * 打标记的重入保护。
+ *
+ * 生成图标信息（构造 / Parcel 反序列化 / PMS 生成）的几条路径会互相嵌套：
+ * 外层生成 `PackageInfo` 时内部又会构造 `ApplicationInfo`，而 `PackageInfo` 里装的正是
+ * 这些 `ApplicationInfo`。没有这层保护就会出现"打过标记又被当作新 id 再处理一遍"。
+ */
+private val markingIcons = ThreadLocal.withInitial { false }
 
-  // 应用图标最终都会到 Resources.getDrawableForDensity(int, int, Theme)：
-  // Resources.getDrawable(id, theme) 和 PackageItemInfo.loadIcon() 都转调它。
+/**
+ * 图标生成的重入保护。
+ *
+ * `Resources.getDrawableForDensity()` 和 `ApplicationPackageManager.getDrawableInternal()`
+ * 可能出现在同一条调用链上：外层 proceed 之后会跑到内层。只让最外层生成图标，
+ * 否则同一个图标会被包装两次（圆套圆、尺寸再缩一次），表现就是"同一个图标
+ * 有时大有时小"。
+ */
+private val replacingIcon = ThreadLocal.withInitial { false }
+
+private inline fun runMarkingIcons(block: () -> Unit) {
+  if (markingIcons.get() == true) return
+  markingIcons.set(true)
+  try {
+    block()
+  } finally {
+    markingIcons.set(false)
+  }
+}
+
+/** 同一进程里 `onSystemServerStarting` 和 `onPackageReady` 可能都来，别装两遍。 */
+@Volatile private var installed = false
+
+fun hookSystemServer(
+  xposed: XposedInterface,
+  param: XposedModuleInterface.SystemServerStartingParam,
+) = install(xposed, param.classLoader, "android")
+
+fun hookIcons(xposed: XposedInterface, param: XposedModuleInterface.PackageReadyParam) =
+  install(xposed, param.classLoader, param.packageName)
+
+/**
+ * 图标替换分两步：先在**图标信息**上把 icon 资源 id 打标记，再在**图标加载出口**上
+ * 认出这个标记并把结果裁成圆形。两步缺一不可，所以加载出口挂不上时就整体放弃 ——
+ * 否则被打过标记的 id 会在别的进程里解析失败，图标直接变成空白。
+ */
+private fun install(xposed: XposedInterface, classLoader: ClassLoader, packageName: String) {
+  if (installed) return
+  Log.d(TAG, "install in $packageName, sdk ${Build.VERSION.SDK_INT}")
+
+  if (!hookIconLoaders(xposed, classLoader)) {
+    Log.w(TAG, "No icon loader is found, nothing is hooked")
+    return
+  }
+  installed = true
+
+  hookMarkedIconIds(xposed)
+  hookBatchIconIds(xposed, classLoader)
+  hookShortcutIcons(xposed)
+  hookArchivedAppIcon(xposed, classLoader)
+
+  if (packageName == "com.android.launcher3" ||
+      packageName == "com.google.android.apps.nexuslauncher"
+  ) {
+    hookPixelLauncher(xposed, classLoader)
+    hookTaskIcons(xposed, classLoader)
+  }
+  if (packageName == "com.android.systemui") hookSplashScreenIcon(xposed, classLoader)
+  if (packageName == "com.android.settings") hookSettingsAdaptiveIcon(xposed, classLoader)
+
+  Log.d(TAG, "Hooked $packageName")
+}
+
+/**
+ * 图标的加载出口。应用图标最终都会到 `Resources.getDrawableForDensity()`：
+ * `Resources.getDrawable(id, theme)` 和 `PackageItemInfo.loadIcon()` 都转调它。
+ * 较新的安卓版本改成在 `ApplicationPackageManager` 里解析 item 图标。
+ */
+private fun hookIconLoaders(xposed: XposedInterface, classLoader: ClassLoader): Boolean {
   var hooked = false
   for (method in declaredMethods(Resources::class.java, "getDrawableForDensity")) {
     hooked = hookIconLoader(xposed, method) || hooked
   }
-  // 较新的 android 版本改成在 ApplicationPackageManager 里解析 item 图标。
-  classOf("android.app.ApplicationPackageManager", param)?.let { clazz ->
-    for (method in declaredMethods(clazz, "getDrawableInternal")) {
+  val packageManager = classOf("android.app.ApplicationPackageManager", classLoader)
+  if (packageManager != null) {
+    for (method in declaredMethods(packageManager, "getDrawableInternal")) {
       hooked = hookIconLoader(xposed, method) || hooked
     }
   }
+  return hooked
+}
 
-  // 只有在加载通道挂上了才敢改 res id，否则被改过的 id 会解析失败。
-  if (!hooked) {
-    Log.w(TAG, "No icon loader is found, nothing is hooked")
-    return
+private fun hookIconLoader(xposed: XposedInterface, method: Method): Boolean =
+  runCatching {
+      xposed.hook(method).intercept { chain ->
+        val args = chain.args
+
+        // 被标记的图标 id 是唯一认得出来的参数，找它比记住参数下标可靠。
+        val index = args.indexOfFirst { (it as? Int)?.isMarkedIcon() == true }
+        if (index < 0) {
+          // 解析不出应用图标时系统会退回这个默认图标，它同样不是圆的。
+          if (args.indexOfFirst { (it as? Int) == DEFAULT_APP_ICON } < 0) {
+            return@intercept chain.proceed(args.toTypedArray())
+          }
+          val fallback = chain.proceed(args.toTypedArray()) as? Drawable
+          return@intercept if (fallback == null) null else clipToCircle(fallback)
+        }
+
+        // 已经在生成图标了（同一条调用链的内层），交给最外层处理。
+        if (replacingIcon.get() == true) return@intercept chain.proceed(args.toTypedArray())
+        replacingIcon.set(true)
+        try {
+          val restored = args.toMutableList()
+          restored[index] = (args[index] as Int).unmarked()
+          val icon =
+            chain.proceedWith(chain.thisObject, restored.toTypedArray()) as? Drawable
+          if (icon == null) null else clipToCircle(icon)
+        } finally {
+          replacingIcon.set(false)
+        }
+      }
+      true
+    }
+    .getOrDefault(false)
+
+/** 归档应用的图标走的是独立的接口，不经过上面那两个出口。 */
+private fun hookArchivedAppIcon(xposed: XposedInterface, classLoader: ClassLoader) {
+  val packageManager = classOf("android.app.ApplicationPackageManager", classLoader) ?: return
+  var hooked = 0
+  for (method in declaredMethods(packageManager, "getArchivedAppIcon")) {
+    runCatching {
+      xposed.hook(method).intercept { chain ->
+        val icon = chain.proceed(chain.args.toTypedArray()) as? Drawable ?: return@intercept null
+        clipToCircle(icon)
+      }
+      hooked++
+    }
   }
-  hookPixelLauncher(xposed, param)
-  hookIconIds(xposed)
-  hookShortcutIcons(xposed)
-  Log.d(TAG, "Hooked ${param.packageName}")
+  if (hooked > 0) Log.d(TAG, "ArchivedAppIcon: $hooked hooked")
+}
+
+/**
+ * 在图标信息**构造**时打标记。这是最基础的一条路径，覆盖 launcher / systemui /
+ * settings 里逐个构造出来的 `ApplicationInfo` / `ActivityInfo` / `ResolveInfo`。
+ */
+private fun hookMarkedIconIds(xposed: XposedInterface) {
+  val itemClasses =
+    listOf(
+      ApplicationInfo::class.java,
+      ActivityInfo::class.java,
+      ServiceInfo::class.java,
+      ProviderInfo::class.java,
+    )
+  for (clazz in itemClasses) {
+    for (ctor in declaredConstructors(clazz)) {
+      runCatching {
+        xposed.hook(ctor).intercept { chain ->
+          val result = chain.proceed(chain.args.toTypedArray())
+          val info = chain.thisObject as? PackageItemInfo ?: return@intercept result
+          runMarkingIcons { markIcon(info) }
+          result
+        }
+      }
+    }
+  }
+
+  for (ctor in declaredConstructors(ResolveInfo::class.java)) {
+    runCatching {
+      xposed.hook(ctor).intercept { chain ->
+        val result = chain.proceed(chain.args.toTypedArray())
+        runMarkingIcons { markResolveInfo(chain.thisObject as? ResolveInfo) }
+        result
+      }
+    }
+  }
+}
+
+/**
+ * 批量 / 跨进程通道 —— **应用列表真正走的是这里**，不是上面那条逐个构造的路径。
+ *
+ * Settings 的应用列表、分享页、权限页拿到的图标是 PMS 一次性序列化过来的一整包
+ * `PackageInfo` / `ResolveInfo`。只 hook 构造的话，这些列表里的图标根本不会经过
+ * 我们的加载出口，于是仍然显示原图。
+ */
+private fun hookBatchIconIds(xposed: XposedInterface, classLoader: ClassLoader) {
+  var hooked = 0
+
+  for (method in declaredMethods(Parcel::class.java, "readTypedList")) {
+    runCatching {
+      xposed.hook(method).intercept { chain ->
+        val result = chain.proceed(chain.args.toTypedArray())
+        markAll(result as? List<*>)
+        result
+      }
+      hooked++
+    }
+  }
+
+  for (method in declaredMethods(Parcel::class.java, "createTypedArray")) {
+    runCatching {
+      xposed.hook(method).intercept { chain ->
+        val result = chain.proceed(chain.args.toTypedArray())
+        markAll((result as? Array<*>)?.asIterable())
+        result
+      }
+      hooked++
+    }
+  }
+
+  if (hooked > 0) Log.d(TAG, "Parcel: $hooked hooked")
+
+  hookParceledListSlice(xposed, classLoader)
+  hookPackageInfoCommonUtils(xposed, classLoader)
+}
+
+/**
+ * 跨进程传大列表用的容器。一次性把整张列表打标记，比逐个处理快得多。
+ */
+private fun hookParceledListSlice(xposed: XposedInterface, classLoader: ClassLoader) {
+  val base = classOf("android.content.pm.BaseParceledListSlice", classLoader) ?: return
+  val mList = fieldOf(base, "mList") ?: return
+  var hooked = 0
+  for (ctor in declaredConstructors(base)) {
+    runCatching {
+      xposed.hook(ctor).intercept { chain ->
+        val result = chain.proceed(chain.args.toTypedArray())
+        markAll(runCatching { mList.get(chain.thisObject) as? List<*> }.getOrNull())
+        result
+      }
+      hooked++
+    }
+  }
+  if (hooked > 0) Log.d(TAG, "ParceledListSlice: $hooked hooked")
+}
+
+/**
+ * PMS 生成图标信息的地方（system_server 进程）。在系统侧就打好标记，
+ * 客户端拿到的一定是带标记的 id，覆盖面比在客户端补救大得多。
+ */
+private fun hookPackageInfoCommonUtils(xposed: XposedInterface, classLoader: ClassLoader) {
+  val utils = classOf("com.android.internal.pm.parsing.PackageInfoCommonUtils", classLoader)
+    ?: return
+  val names =
+    listOf(
+      "generate",
+      "generateApplicationInfo",
+      "generateActivityInfo",
+      "generateServiceInfo",
+      "generateProviderInfo",
+    )
+  var hooked = 0
+  for (name in names) {
+    for (method in declaredMethods(utils, name)) {
+      runCatching {
+        xposed.hook(method).intercept { chain ->
+          val result = chain.proceed(chain.args.toTypedArray())
+          markInfo(result)
+          result
+        }
+        hooked++
+      }
+    }
+  }
+  if (hooked > 0) Log.d(TAG, "PackageInfoCommonUtils: $hooked hooked")
+}
+
+/**
+ * 最近任务 / 概览里的卡片图标。`TaskIconCache` 先把图标读成 `BitmapDrawable`，
+ * 再包成 `BitmapInfo`；在这个入口上换成裁好的圆形即可。
+ */
+private fun hookTaskIcons(xposed: XposedInterface, classLoader: ClassLoader) {
+  val cache = classOf("com.android.quickstep.TaskIconCache", classLoader) ?: return
+  var hooked = 0
+  for (method in declaredMethods(cache, "getBitmapInfo")) {
+    runCatching {
+      xposed.hook(method).intercept { chain ->
+        val args = chain.args
+        val index = args.indexOfFirst { it is Drawable }
+        if (index < 0) return@intercept chain.proceed(args.toTypedArray())
+        val replaced = args.toMutableList()
+        replaced[index] = clipToCircle(args[index] as Drawable)
+        chain.proceedWith(chain.thisObject, replaced.toTypedArray())
+      }
+      hooked++
+    }
+  }
+  if (hooked > 0) Log.d(TAG, "TaskIconCache: $hooked hooked")
 }
 
 /**
@@ -71,10 +337,7 @@ fun hookIcons(xposed: XposedInterface, param: XposedModuleInterface.PackageReady
  *
  * 旧 Android 版本没有这个开关，本 hook 自动 no-op。
  */
-private fun hookPixelLauncher(
-  xposed: XposedInterface,
-  param: XposedModuleInterface.PackageReadyParam,
-) {
+private fun hookPixelLauncher(xposed: XposedInterface, classLoader: ClassLoader) {
   if (Build.VERSION.SDK_INT < Build.VERSION_CODES.BAKLAVA) return
 
   // Launcher3 的类在**不同 ROM 上包名不同**：
@@ -85,17 +348,13 @@ private fun hookPixelLauncher(
   // 两个都试一遍，哪个存在用哪个。
   val launcherPkgs = listOf("com.android.launcher3", "com.google.android.apps.nexuslauncher")
   val baseIconFactoryClass =
-    firstClassOf(launcherPkgs.map { "$it.icons.BaseIconFactory" }, param) ?: return
+    firstClassOf(launcherPkgs.map { "$it.icons.BaseIconFactory" }, classLoader) ?: return
   val iconOptionsClass =
     firstClassOf(
       launcherPkgs.map { pkg -> pkg + ".icons.BaseIconFactory" + '$' + "IconOptions" },
-      param,
+      classLoader,
     ) ?: return
-  val drawFullBleedField =
-    runCatching {
-        iconOptionsClass.getDeclaredField("drawFullBleed").apply { isAccessible = true }
-      }
-      .getOrNull() ?: return
+  val drawFullBleedField = fieldOf(iconOptionsClass, "drawFullBleed") ?: return
 
   var hooked = 0
   for (method in
@@ -113,77 +372,121 @@ private fun hookPixelLauncher(
       hooked++
     }
   }
-  if (hooked > 0) Log.d(TAG, "PixelLauncher: $hooked createBadgedIconBitmap hooked in ${param.packageName}")
+  if (hooked > 0) Log.d(TAG, "PixelLauncher: $hooked createBadgedIconBitmap hooked")
 }
 
-private fun hookIconLoader(xposed: XposedInterface, method: Method): Boolean =
-  runCatching {
-      xposed.hook(method).intercept { chain ->
-        val args = chain.args
-        // 被标记的图标 id 是唯一认得出来的参数，找它比记住参数下标可靠。
-        val index = args.indexOfFirst { (it as? Int)?.isMarkedIcon() == true }
-        if (index < 0) return@intercept chain.proceed(args.toTypedArray())
-        val restored = args.toMutableList()
-        restored[index] = (args[index] as Int).unmarked()
-        val icon = chain.proceedWith(chain.thisObject, restored.toTypedArray()) as? Drawable
-        if (icon == null) null else clipToCircle(icon)
-      }
-      true
-    }
-    .getOrDefault(false)
-
-private fun hookIconIds(xposed: XposedInterface) {
-  val itemClasses =
-    listOf(
-      ApplicationInfo::class.java,
-      ActivityInfo::class.java,
-      ServiceInfo::class.java,
-      ProviderInfo::class.java,
+/**
+ * 冷启动 splash 屏上的那张图标。
+ *
+ * 系统会分析图标的背景色，背景透明时它判定"图标没有可当背景的部分"，只画不透明区域。
+ * 我们把图标裁成了圆（圆外透明），正好落进这个判定。强制标记"背景是复杂的"，
+ * 让系统把整张图标画出来。
+ */
+private fun hookSplashScreenIcon(xposed: XposedInterface, classLoader: ClassLoader) {
+  val iconColor =
+    classOf(
+      "com.android.wm.shell.startingsurface.SplashscreenContentDrawer\$ColorCache\$IconColor",
+      classLoader,
     )
-  for (clazz in itemClasses) {
-    for (ctor in declaredConstructors(clazz)) {
-      runCatching {
-        xposed.hook(ctor).intercept { chain ->
-          val result = chain.proceed(chain.args.toTypedArray())
-          val info = chain.thisObject as? PackageItemInfo ?: return@intercept result
-          // 快捷设置磁贴画的是小尺寸单色图形，不是应用图标。
-          if (info is ServiceInfo && info.permission == Manifest.permission.BIND_QUICK_SETTINGS_TILE)
-            return@intercept result
-          val icon = info.icon
-          if (icon != 0 && icon.isAppResource()) info.icon = icon.marked()
-          result
-        }
-      }
-    }
-  }
-
-  for (ctor in declaredConstructors(ResolveInfo::class.java)) {
+      ?: return
+  val mBgColor = fieldOf(iconColor, "mBgColor") ?: return
+  val mIsBgComplex = fieldOf(iconColor, "mIsBgComplex") ?: return
+  var hooked = 0
+  for (ctor in declaredConstructors(iconColor)) {
     runCatching {
       xposed.hook(ctor).intercept { chain ->
         val result = chain.proceed(chain.args.toTypedArray())
-        val ri = chain.thisObject as? ResolveInfo ?: return@intercept result
-        val icon = ri.componentInfo?.icon?.takeIf { it != 0 } ?: return@intercept result
-        ri.icon = icon
-        setIntField(ri, "iconResourceId", icon)
+        runCatching {
+          if (mIsBgComplex.getBoolean(chain.thisObject)) return@runCatching
+          if (mBgColor.getInt(chain.thisObject) == 0) {
+            mIsBgComplex.setBoolean(chain.thisObject, true)
+          }
+        }
         result
       }
+      hooked++
     }
   }
+  if (hooked > 0) Log.d(TAG, "SplashScreen: $hooked hooked")
+}
+
+/**
+ * Android 15+ 的设置页会把图标再过一遍 `Utils.getAdaptiveIcon()`，非自适应图标会被
+ * 它自己套一层形状。这里先把图标换成裁好的，它就原样返回了。
+ */
+private fun hookSettingsAdaptiveIcon(xposed: XposedInterface, classLoader: ClassLoader) {
+  if (Build.VERSION.SDK_INT < Build.VERSION_CODES.VANILLA_ICE_CREAM) return
+  val utils = classOf("com.android.settings.Utils", classLoader) ?: return
+  var hooked = 0
+  for (method in declaredMethods(utils, "getAdaptiveIcon")) {
+    runCatching {
+      xposed.hook(method).intercept { chain ->
+        val args = chain.args
+        val index = args.indexOfFirst { it is Drawable }
+        if (index < 0) return@intercept chain.proceed(args.toTypedArray())
+        val replaced = args.toMutableList()
+        replaced[index] = clipToCircle(args[index] as Drawable)
+        chain.proceedWith(chain.thisObject, replaced.toTypedArray())
+      }
+      hooked++
+    }
+  }
+  if (hooked > 0) Log.d(TAG, "Settings: $hooked hooked")
 }
 
 private fun hookShortcutIcons(xposed: XposedInterface) {
+  var hooked = 0
   for (method in declaredMethods(LauncherApps::class.java, "getShortcutIconDrawable")) {
     runCatching {
       xposed.hook(method).intercept { chain ->
         val icon = chain.proceed(chain.args.toTypedArray()) as? Drawable ?: return@intercept null
         clipToCircle(icon)
       }
+      hooked++
     }
+  }
+  if (hooked > 0) Log.d(TAG, "Shortcut: $hooked hooked")
+}
+
+private fun markAll(items: Iterable<*>?) {
+  val list = items ?: return
+  runMarkingIcons {
+    for (item in list) markInfo(item)
   }
 }
 
-private val ResolveInfo.componentInfo: ComponentInfo?
-  get() = activityInfo ?: serviceInfo ?: providerInfo
+private fun markInfo(info: Any?) {
+  when (info) {
+    is PackageInfo ->
+      runMarkingIcons {
+        info.applicationInfo?.let(::markIcon)
+        info.activities?.forEach(::markIcon)
+        info.services?.forEach(::markIcon)
+        info.providers?.forEach(::markIcon)
+      }
+    is PackageItemInfo -> runMarkingIcons { markIcon(info) }
+    is ResolveInfo -> runMarkingIcons { markResolveInfo(info) }
+    else -> Unit
+  }
+}
+
+private fun markIcon(info: PackageItemInfo) {
+  // 快捷设置磁贴画的是小尺寸单色图形，不是应用图标。
+  if (info is ServiceInfo && info.permission == Manifest.permission.BIND_QUICK_SETTINGS_TILE) return
+  val icon = info.icon
+  if (icon != 0 && icon.isAppResource()) info.icon = icon.marked()
+}
+
+private fun markResolveInfo(info: ResolveInfo?) {
+  val resolveInfo = info ?: return
+  // 组件自己的 icon 在构造时已经打过标记，这里原样继承即可。
+  val component =
+    resolveInfo.activityInfo ?: resolveInfo.serviceInfo ?: resolveInfo.providerInfo ?: return
+  val icon = component.icon
+  if (icon == 0) return
+  resolveInfo.icon = icon
+  setIntField(resolveInfo, "iconResourceId", icon)
+}
 
 private fun declaredMethods(clazz: Class<*>, name: String): List<Method> =
   clazz.declaredMethods.filter { it.name == name }.onEach { it.isAccessible = true }
@@ -191,8 +494,8 @@ private fun declaredMethods(clazz: Class<*>, name: String): List<Method> =
 private fun declaredConstructors(clazz: Class<*>): List<Constructor<*>> =
   clazz.declaredConstructors.toList().onEach { it.isAccessible = true }
 
-private fun classOf(name: String, param: XposedModuleInterface.PackageReadyParam): Class<*>? =
-  runCatching { Class.forName(name, true, param.classLoader) }.getOrNull()
+private fun classOf(name: String, classLoader: ClassLoader): Class<*>? =
+  runCatching { Class.forName(name, true, classLoader) }.getOrNull()
 
 /**
  * 按候选名依次尝试，返回**第一个存在**的类。
@@ -200,10 +503,11 @@ private fun classOf(name: String, param: XposedModuleInterface.PackageReadyParam
  * Launcher3 的内部类在不同 ROM 上包名不同（AOSP 的 `com.android.launcher3.*` vs
  * Pixel 的 `com.google.android.apps.nexuslauncher.*`），所以类名不能写死一个。
  */
-private fun firstClassOf(
-  names: List<String>,
-  param: XposedModuleInterface.PackageReadyParam,
-): Class<*>? = names.firstNotNullOfOrNull { classOf(it, param) }
+private fun firstClassOf(names: List<String>, classLoader: ClassLoader): Class<*>? =
+  names.firstNotNullOfOrNull { classOf(it, classLoader) }
+
+private fun fieldOf(clazz: Class<*>, name: String) =
+  runCatching { clazz.getDeclaredField(name).apply { isAccessible = true } }.getOrNull()
 
 private fun setIntField(obj: Any, name: String, value: Int) = runCatching {
   obj.javaClass.getDeclaredField(name).apply { isAccessible = true }.set(obj, value)

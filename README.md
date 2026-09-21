@@ -60,19 +60,40 @@ Hooked com.android.settings
    把图标资源 id 从 `0x7f……` 挪到 `0x6e……`（一个不会有真实资源的 package id）作为标记。
 2. 在 `Resources.getDrawableForDensity()`（以及新版本上的 `ApplicationPackageManager.getDrawableInternal()`）
    出口认出这个标记，换回原始 id 调用原方法拿到图标，再包成 `CircleIconDrawable` 返回。
-3. `CircleIconDrawable` 继承 `AdaptiveIconDrawable`：**原图标放在 background 层**，
-   foreground 用 `ColorDrawable(TRANSPARENT)` 占位。这里有三个反直觉的点：
-   - 内容必须放在 background（或 foreground）层里，因为 launcher 按自适应语义**只取
-     `getBackground()` / `getForeground()` 分别绘制**，它根本不会调用我们的 `draw()`。
-     把内容画在重写的 `draw()` 里 = launcher 永远看不到（表现就是一个纯黑的圆）。
-   - 父类会把每一层的 bounds 设成 `1.5 × view bounds`，mask 只保留中心的 view bounds。
-     所以 `CenteredIconDrawable` 要在这个 1.5× 区域里把原图标画到**中心 2/3**，
-     正好等于最终 view bounds —— 经 mask 裁切后就是 1:1，既不放大也不留边。
-   - 形状直接交给系统 mask（`config_icon_mask`）决定，不自己再裁一次 ——
-     双重裁切会把圆角方形之类的系统形状又裁成内切圆。
-4. **Android 16+** 额外 hook `BaseIconFactory.createBadgedIconBitmap`（Pixel Launcher），
+   `android.R.drawable.sym_def_app_icon`（解析不出应用图标时用的兜底）和
+   `getArchivedAppIcon`（归档应用）也会被同样裁圆。
+3. **批量通道**：上面两步只能盖到"逐个拿图标"的代码路径。Settings 应用列表、分享页、
+   权限页拿到的图标是 PMS 一次性序列化过来的一整包 `PackageInfo` / `ResolveInfo`，
+   走的是完全不同的路径：`Parcel.readTypedList` / `createTypedArray`、
+   `BaseParceledListSlice` 构造、`PackageInfoCommonUtils.generate*Info`。只 hook 第 1 步
+   的构造器的话，这些列表里的图标根本不会经过第 2 步的加载出口。
+   这几条也都挂上同样的"打标记"逻辑，加上 `markingIcons` ThreadLocal 防重入，
+   覆盖才完整。
+4. **system_server 提前注入**：`XposedMain.onSystemServerStarting` 让模块在 PMS 启动前
+   就装上，客户端拿到的 id 从头就是带标记的。`onPackageReady` 的"android"包名也走同一套
+   装机函数，`installed` flag 防重复。
+5. **最近任务 / 概览**：`com.android.quickstep.TaskIconCache.getBitmapInfo` 在把
+   `BitmapDrawable` 包成 `BitmapInfo` 之前，先替换成 `clipToCircle` 的结果。
+6. **冷启动 splash**：`SplashscreenContentDrawer$ColorCache$IconColor` 构造时如果
+   发现背景是透明的，强制把 `mIsBgComplex` 标成 `true`，让系统把整张图标画出来
+   而不是只画不透明区域（圆形图标圆外透明正好落进这个判定）。
+7. **设置页自适应包装**（Android 15+）：`com.android.settings.Utils.getAdaptiveIcon`
+   会把非自适应图标自己套一层形状，先把入参换成裁好的，它就原样返回。
+8. **`CircleIconDrawable` 继承 `AdaptiveIconDrawable`，形状自己画圆，不依赖系统 mask**。
+   `RoundedIconDrawable`（background 层）在自己 bounds（1.5× view）内把原图标 cover 到
+   中心 2/3（= 最终 view bounds 大小），再用 `DST_IN` 在离屏位图上裁一个内切圆：
+   - launcher 按 adaptive 语义只取 background / foreground 分别绘制，**不调我们的 `draw()`**，
+     所以圆形必须在 background 的 `draw()` 里就画好。
+   - 父类把 layer bounds 设成 `1.5 × view bounds`，里面画到中心 2/3 = 最终 view bounds
+     大小，1:1 不放大。
+   - 形状由我们定（正圆），不再看 `config_icon_mask`：mask 只能"保留"不能"凭空填出"
+     圆外部分，而我们圆外本来透明 → 无论 ROM 的 mask 是圆是方是水滴，看到的都是圆。
+9. **Android 16+**（BAKLAVA）额外 hook `BaseIconFactory.createBadgedIconBitmap`（Pixel / AOSP Launcher3），
    把 `IconOptions.drawFullBleed` 设成 `false`，让 launcher 不再加自己的白圆背景板。
    旧版 Android 没有这个开关，hook 自动 no-op。
+10. **防重入**：`markingIcons`（打标记时用，防止生成 Info 的几条路径互相嵌套重复打）
+    和 `replacingIcon`（图标加载时用，防止 `Resources` / `APM` 在同一条链上双层包装）
+    两个 ThreadLocal，与参考实现的做法一致。
 
 ## API 102（libxposed）合规性
 
@@ -125,17 +146,15 @@ Hooked com.android.settings
 
 - 快捷设置磁贴（`BIND_QUICK_SETTINGS_TILE`）画的是小尺寸单色图形，被排除在外。
 - 通知栏小图标、快捷方式以外的小图标走的是别的资源，不受影响。
-- **桌面图标 & 点击过渡动画**（v1.0.3+）：模块挂钩应用图标的资源加载通道，
-  launcher 桌面、应用抽屉、点击图标那个浮起放大的过渡动画（`FloatingIconView`）
-  都是圆形。后者 v1.0.3 才修好 —— 之前 `FloatingIconView` 拿到 `newDrawable()`
-  后是**直接 `draw()`**，不走 `BaseIconFactory.createBadgedIconBitmap()`，
-  没人应用系统 mask；现在 `CircleIconDrawable` 自己 `draw()` 时用
-  `AdaptiveIconDrawable.getIconMask()`（API 33+）自己 clip 一次，跟
-  `BaseIconFactory` 那条路径用同一个 mask，重复裁切不会把圆角方形之类裁成内切圆。
-- **设置页/分享菜单/SplashScreen**：走 `system_server` 里 PMS 缓存的 Bitmap 路径，
-  而 `system_server` 在 boot 时启动往往早于 LSPosed daemon，未被注入，这一处看到的
-  还是原图。这是 LSPosed/Zygisk 启动时机的限制。**重启一次设备**让 `system_server`
-  也能进入注入；如果只关心 launcher 桌面/抽屉/点击过渡，效果完整。
+- **桌面图标 & 点击过渡动画**：`CircleIconDrawable.getConstantState()` 实现非 null，
+  `FloatingIconView.getIconResult()` 取 `newDrawable()` 时不会 NPE，点击不崩（v1.0.2 → v1.0.3）。
+- **设置页 / 分享菜单**：靠 `Parcel` / `BaseParceledListSlice` / `PackageInfoCommonUtils`
+  这几条批量通道把 PMS 传来的整包列表打上标记。
+- **system_server 注入时机**：boot 时 LSPosed daemon 经常晚于 `system_server`，
+  此时 `/proc/<system_server pid>/maps` 里没有模块 → `onSystemServerStarting` 没机会执行。
+  实际效果看 daemon 何时起来：本机 Sony 上 boot 时 system_server 没注入，但 Settings
+  应用列表已经是圆形（说明客户端 `onPackageReady` 里的批量通道够用了）。
+  重启设备或调整 LSPosed 启动时机可以改善。
 
 ## 关于 AOSP Launcher3（Pixel / Quickstep 自带桌面）
 

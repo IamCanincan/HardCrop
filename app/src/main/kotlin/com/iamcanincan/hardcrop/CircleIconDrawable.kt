@@ -1,12 +1,23 @@
 package com.iamcanincan.hardcrop
 
+import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.ColorFilter
+import android.graphics.Paint
 import android.graphics.PixelFormat
+import android.graphics.PorterDuff
+import android.graphics.PorterDuffXfermode
 import android.graphics.drawable.AdaptiveIconDrawable
 import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.Drawable
+
+/**
+ * 父类 `AdaptiveIconDrawable` 把每一层的 bounds 设成 `1.5 × view bounds`
+ * （`DEFAULT_VIEW_PORT_SCALE = 1 / 1.5`），只有中心那 `view bounds` 是可见区域。
+ * 内容要画到中心 `1 / 1.5` 才是 1:1 呈现。
+ */
+private const val VIEW_PORT_SCALE = 1f / 1.5f
 
 /**
  * 把非自适应图标裁成圆形，并让 launcher 按自适应图标的方式处理它。
@@ -14,34 +25,32 @@ import android.graphics.drawable.Drawable
  * ## 为什么必须是 AdaptiveIconDrawable
  * AOSP Launcher3 / Pixel Launcher 对桌面图标有两条完全不同的路径：
  * - `instanceof AdaptiveIconDrawable` → 走 **adaptive 路径**：取 `getBackground()` /
- *   `getForeground()` 分别绘制，再用系统 mask（`config_icon_mask`，设备上是圆形）裁切，
+ *   `getForeground()` 分别绘制，再加系统 mask（`config_icon_mask`）裁切，
  *   **不加 launcher 自带的白色背景板、不缩到 safe zone**。
  * - 其他 → 走 wrap 路径：加 launcher 自带的白圆板 + 缩到 safe zone。
  *
  * 要拿到"无白边"只有走 adaptive 路径这一条路。
  *
  * ## 为什么实际内容要放在 background 层
- * launcher 按 adaptive 语义**只取 background / foreground 分别绘制**，它并不会调用我们的
- * `draw()`。上一版把内容画在重写的 `draw()` 里、bg/fg 只放透明占位 —— 结果是 launcher
- * 只画了两个透明层，看到的就是一个"透明圆"（表现为纯黑）。
+ * launcher 按 adaptive 语义**只取 background / foreground 分别绘制**，它并不会调用外层
+ * 的 `draw()`。内容画在外层的 `draw()` 里 = launcher 只画了两个透明层（表现为纯黑）。
  *
  * 所以：**foreground 保持透明（不遮挡），实际内容放 background**。
  *
- * ## 为什么 background 要把内容画到中心 2/3
- * 父类 `AdaptiveIconDrawable` 会把每一层的 bounds 设成 `1.5 × view bounds`
- * （`DEFAULT_VIEW_PORT_SCALE = 1/1.5`），mask 只保留中心 `view bounds` 区域。
- * 如果 background 铺满这 1.5 × 区域，最终看到的就是"内容被放大 1.5 倍、四周被裁掉"。
- * 因此 [CenteredIconDrawable] 在自己的 bounds（= 1.5 × view）内把原图标画到**中心 2/3**
- * （正好等于 view bounds），这样经 mask 裁切后原图标就是 1:1 铺满最终圆形。
+ * ## 为什么形状由我们自己画，不看系统 mask
+ * 早期版本让系统 mask 去裁：`config_icon_mask` 由 ROM 决定，有的圆、有的圆角方、
+ * 有的水滴 —— 于是"裁出来是什么形状"完全随设备变。
  *
- * ## 关于形状
- * 形状由父类的 mask（系统 `config_icon_mask`）决定，不再自己重写 `draw` 再裁一次 ——
- * 双重裁切会让圆角方形之类的系统形状被裁成内切圆，反而与"和自适应图标一致"矛盾。
- * 设备上的系统形状是圆形，因此最终就是正圆。
+ * 现在改成 [RoundedIconDrawable] 在离屏位图上用 `DST_IN` 自己画一个正圆。这样无论
+ * 系统 mask 是什么形状，看到的都是同一个圆：mask 只能"保留"像素，不能"凭空填出"
+ * 圆外的部分，而我们圆外本来就是透明的。
+ *
+ * 这比去 hook 系统 mask 或依赖某个版本才有的开关稳得多，且对所有 Android 版本、
+ * 所有桌面（含第三方）都成立。
  */
 class CircleIconDrawable(icon: Drawable) :
   AdaptiveIconDrawable(
-    CenteredIconDrawable(icon),
+    RoundedIconDrawable(icon),
     ColorDrawable(Color.TRANSPARENT),
   ) {
 
@@ -52,7 +61,7 @@ class CircleIconDrawable(icon: Drawable) :
     val inner = background?.constantState
     // 同样**不能返回 null**：Launcher3 的 FloatingIconView 直接调
     // getConstantState().newDrawable()，null = NPE = 桌面进程崩。
-    // CenteredIconDrawable 已保证非 null，这里的兜底只是防止把 launcher 带崩。
+    // RoundedIconDrawable 已保证非 null，这里的兜底只是防止把 launcher 带崩。
     return object : ConstantState() {
       override fun newDrawable(): Drawable =
         CircleIconDrawable(inner?.newDrawable() ?: ColorDrawable(Color.TRANSPARENT))
@@ -63,19 +72,30 @@ class CircleIconDrawable(icon: Drawable) :
 }
 
 /**
- * 把原图标画到 bounds 的**中心 2/3**（cover 方式填满该区域、居中裁切）。
+ * 把原图标按 cover 方式画到 bounds 的**中心 2/3**，再裁成正圆。
  *
- * 父类会把这一层的 bounds 设成 1.5 × view bounds，所以"中心 2/3"正好等于最终的
- * view bounds —— 原图标因此 1:1 呈现在圆形里，既不放大也不留边。
+ * 父类会把这一层的 bounds 设成 `1.5 × view bounds`，所以"中心 2/3"正好等于最终可见的
+ * view bounds —— 原图标因此 1:1 呈现在圆里，既不放大也不留边。
  */
-private class CenteredIconDrawable(private val icon: Drawable) : Drawable() {
+private class RoundedIconDrawable(private val icon: Drawable) : Drawable() {
+
+  private val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+  private val maskMode = PorterDuffXfermode(PorterDuff.Mode.DST_IN)
+  private var cache: Bitmap? = null
 
   override fun draw(canvas: Canvas) {
-    val bounds = bounds
-    if (bounds.isEmpty) return
+    val width = bounds.width()
+    val height = bounds.height()
+    if (width <= 0 || height <= 0) return
 
-    // 1.5 × view bounds 中的中心 2/3 = 最终可见的 view bounds
-    val side = minOf(bounds.width(), bounds.height()) * (1f / 1.5f)
+    // 尺寸没变就复用位图；内容每次重画（图标可能是会动的，比如时钟）。
+    val bitmap =
+      cache?.takeIf { it.width == width && it.height == height }
+        ?: Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).also { cache = it }
+    val layer = Canvas(bitmap)
+    bitmap.eraseColor(Color.TRANSPARENT)
+
+    val side = minOf(width, height) * VIEW_PORT_SCALE
     val intrinsicWidth = icon.intrinsicWidth.takeIf { it > 0 } ?: side.toInt()
     val intrinsicHeight = icon.intrinsicHeight.takeIf { it > 0 } ?: side.toInt()
 
@@ -83,25 +103,40 @@ private class CenteredIconDrawable(private val icon: Drawable) : Drawable() {
     val scale = maxOf(side / intrinsicWidth, side / intrinsicHeight)
     val scaledWidth = intrinsicWidth * scale
     val scaledHeight = intrinsicHeight * scale
-    val left = bounds.exactCenterX() - scaledWidth / 2f
-    val top = bounds.exactCenterY() - scaledHeight / 2f
 
-    canvas.save()
-    canvas.translate(left, top)
-    canvas.scale(scale, scale)
+    layer.save()
+    layer.translate(width / 2f - scaledWidth / 2f, height / 2f - scaledHeight / 2f)
+    layer.scale(scale, scale)
     icon.setBounds(0, 0, intrinsicWidth, intrinsicHeight)
-    icon.draw(canvas)
-    canvas.restore()
+    icon.draw(layer)
+    layer.restore()
+
+    // 只保留内切圆以内的像素 —— 形状在这里定死，不经过系统 mask
+    paint.xfermode = maskMode
+    layer.drawOval(
+      width / 2f - side / 2f,
+      height / 2f - side / 2f,
+      width / 2f + side / 2f,
+      height / 2f + side / 2f,
+      paint,
+    )
+    paint.xfermode = null
+
+    canvas.drawBitmap(bitmap, null, bounds, paint)
   }
 
   override fun setAlpha(alpha: Int) {
     icon.alpha = alpha
+    invalidateSelf()
   }
 
   override fun setColorFilter(colorFilter: ColorFilter?) {
     icon.colorFilter = colorFilter
+    invalidateSelf()
   }
 
+  // API 27/28 上 framework 的 Drawable.getOpacity() 还是抽象方法，不能整个删掉。
+  @Suppress("OVERRIDE_DEPRECATION")
   override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
 
   override fun getIntrinsicWidth(): Int = icon.intrinsicWidth
@@ -120,7 +155,7 @@ private class CenteredIconDrawable(private val icon: Drawable) : Drawable() {
     val src = icon.constantState
     return if (src != null) {
       object : ConstantState() {
-        override fun newDrawable(): Drawable = CenteredIconDrawable(src.newDrawable())
+        override fun newDrawable(): Drawable = RoundedIconDrawable(src.newDrawable())
         override fun getChangingConfigurations(): Int = src.changingConfigurations
       }
     } else {
@@ -128,7 +163,7 @@ private class CenteredIconDrawable(private val icon: Drawable) : Drawable() {
       // 这种没法安全地"重建一个等价副本"，就退回复用同一个原图标 ——
       // 比返回 null 崩掉桌面好得多；FloatingIconView 只是临时画一下这个副本。
       object : ConstantState() {
-        override fun newDrawable(): Drawable = CenteredIconDrawable(icon)
+        override fun newDrawable(): Drawable = RoundedIconDrawable(icon)
         override fun getChangingConfigurations(): Int = changingConfigurations
       }
     }

@@ -32,6 +32,17 @@ import io.github.libxposed.api.XposedModuleInterface
  */
 class XposedMain : XposedModule() {
 
+  /**
+   * system_server 是 PMS（包管理服务）所在进程，所有应用的图标信息都是它生成的。
+   *
+   * 这里比 `onPackageReady` 早得多：在 PMS 开始往外发图标之前就把标记逻辑装上，
+   * 客户端拿到的 id 从头就是被打过标记的。只靠 app 进程里补救的话，PMS 侧已经
+   * 建好的那些缓存（Settings 应用列表就是从这里来的）永远是原图。
+   */
+  override fun onSystemServerStarting(param: XposedModuleInterface.SystemServerStartingParam) {
+    hookSystemServer(this, param)
+  }
+
   override fun onPackageReady(param: XposedModuleInterface.PackageReadyParam) {
     if (!param.isFirstPackage) return
     hookIcons(this, param)
