@@ -88,7 +88,12 @@ fun hookIcons(xposed: XposedInterface, param: XposedModuleInterface.PackageReady
 /**
  * 图标替换分两步：先在**图标信息**上把 icon 资源 id 打标记，再在**图标加载出口**上
  * 认出这个标记并把结果裁成圆形。两步缺一不可，所以加载出口挂不上时就整体放弃 ——
- * 否则被打过标记的 id 会在别的进程里解析失败，图标直接变成空白。
+ * 否则被打过标记的 id 会在别的进程里解析失败。
+ *
+ * ⚠ 「在别的进程里解析失败」的后果比"图标变空白"严重得多：伪造的 `0x6e…` 传到没有
+ * 本模块的进程后，`Resources.getDrawable` 会抛 `Resources$NotFoundException`，而
+ * `Activity.initWindowDecorActionBar` 这类调用点就在 `Activity.onCreate` 里 —— **直接崩应用**。
+ * 所以 [hookParcelWriteRestore] 会在 Parcel 出口统一还原，把这条泄漏掐断。
  */
 private fun install(xposed: XposedInterface, classLoader: ClassLoader, packageName: String) {
   if (installed) return
@@ -100,6 +105,8 @@ private fun install(xposed: XposedInterface, classLoader: ClassLoader, packageNa
   }
   installed = true
 
+  // 出口还原必须先挂：它是唯一能挡住"标记 id 泄漏到没注入的进程"的闸门。
+  hookParcelWriteRestore(xposed)
   hookMarkedIconIds(xposed)
   hookBatchIconIds(xposed, classLoader)
   hookShortcutIcons(xposed)
@@ -283,6 +290,72 @@ private fun hookPackageManagerIconGetters(xposed: XposedInterface, classLoader: 
     }
   }
   if (hooked > 0) Log.d(TAG, "PM IconGetters: $hooked hooked")
+}
+
+/**
+ * **跨进程出口还原**：把 icon 的标记换回真实 id 之后再写进 Parcel。
+ *
+ * 打过标记的 id（`0x6e…`）只有**本进程**的图标加载出口认得。system_server 在 PMS 里
+ * 给 `PackageItemInfo` 打标记之后，这些对象会经 Binder 传给任意 app —— 接收方如果
+ * 不在作用域里（没有我们的还原 hook），拿到的伪造 package id 在它自己的资源表里
+ * 根本不存在，一解析就抛 `Resources$NotFoundException`，而且是**在 `Activity.onCreate`
+ * 里抛的，直接把应用带崩**，不是"图标变空白"那么轻。
+ *
+ * 真机案例：华为应用市场 `MainActivity` 的 ActionBar 默认图标走
+ * `Activity.initWindowDecorActionBar` → `PhoneWindow.setDefaultIcon` →
+ * `Context.getDrawable(activityInfo.icon)`，拿到 `0x6e…` 连续两次冷启动都崩。
+ *
+ * 所以写进 Parcel 前必须还原成合法的 `0x7f…`。客户端收到后由 `readTypedList` /
+ * `BaseParceledListSlice` / 构造器 hook 重新打标记，已注入进程的裁圆功能不受影响。
+ */
+private fun hookParcelWriteRestore(xposed: XposedInterface) {
+  var hooked = 0
+
+  // 所有 PackageItemInfo 子类（ApplicationInfo / ActivityInfo / ServiceInfo /
+  // ProviderInfo）的 writeToParcel 都会调到基类这一层，一处覆盖全部。
+  for (method in declaredMethods(PackageItemInfo::class.java, "writeToParcel")) {
+    runCatching {
+      xposed.hook(method).intercept { chain ->
+        val info =
+          chain.thisObject as? PackageItemInfo
+            ?: return@intercept chain.proceed(chain.args.toTypedArray())
+        val saved = info.icon
+        if (saved.isMarkedIcon()) info.icon = saved.unmarked()
+        try {
+          chain.proceed(chain.args.toTypedArray())
+        } finally {
+          info.icon = saved
+        }
+      }
+      hooked++
+    }
+  }
+
+  // ResolveInfo 不是 PackageItemInfo 的子类，它自己还带一份 icon / iconResourceId。
+  for (method in declaredMethods(ResolveInfo::class.java, "writeToParcel")) {
+    runCatching {
+      xposed.hook(method).intercept { chain ->
+        val info =
+          chain.thisObject as? ResolveInfo
+            ?: return@intercept chain.proceed(chain.args.toTypedArray())
+        val savedIcon = info.icon
+        val savedResId = getIntField(info, "iconResourceId")
+        if (savedIcon.isMarkedIcon()) {
+          info.icon = savedIcon.unmarked()
+          setIntField(info, "iconResourceId", savedIcon.unmarked())
+        }
+        try {
+          chain.proceed(chain.args.toTypedArray())
+        } finally {
+          info.icon = savedIcon
+          if (savedResId != null) setIntField(info, "iconResourceId", savedResId)
+        }
+      }
+      hooked++
+    }
+  }
+
+  if (hooked > 0) Log.d(TAG, "ParcelWrite: $hooked hooked (unmark before Binder)")
 }
 
 /**
@@ -818,3 +891,9 @@ private fun fieldOf(clazz: Class<*>, name: String): Field? {
 private fun setIntField(obj: Any, name: String, value: Int) = runCatching {
   obj.javaClass.getDeclaredField(name).apply { isAccessible = true }.set(obj, value)
 }
+
+/** 读 int 字段；字段在旧版本 / 被 R8 改过的类上可能不存在，取不到就返回 null。 */
+private fun getIntField(obj: Any, name: String): Int? = runCatching {
+  obj.javaClass.getDeclaredField(name).apply { isAccessible = true }.get(obj) as Int
+}
+  .getOrNull()

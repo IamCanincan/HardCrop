@@ -19,4 +19,20 @@
         不能按 lint 的建议把它包进 BuildConfig.DEBUG。
     -->
     <issue id="LogConditional" severity="ignore" />
+
+    <!--
+        清缓存要访问的是**宿主应用**（launcher3）自己数据目录里的 `app_icons.db` 和戳记文件，
+        不是本模块的目录 —— `Context.getFilesDir()` 返回的是模块自己的路径，对不上。
+        而且这段跑在 `onPackageReady`（宿主 `Application.attachBaseContext` 阶段），
+        那时还拿不到宿主的 Context，所以路径只能按 `/data/user/<userId>/<pkg>/...` 拼。
+        我们本来就以宿主的 UID 在跑，读写它自己的数据目录不需要任何额外权限。
+    -->
+    <issue id="SdCardPath" severity="ignore" />
+
+    <!--
+        Kotlin 访问同文件里的 private 顶层函数/属性时会生成合成访问器（synthetic accessor），
+        这是编译器行为。改成 internal 只是把可见性从"本文件"放大到"本模块"，
+        换来的只是少一条无害的字节码警告，不划算。
+    -->
+    <issue id="SyntheticAccessor" severity="ignore" />
 </lint>
