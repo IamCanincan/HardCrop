@@ -686,7 +686,13 @@ private fun hookPixelLauncher(xposed: XposedInterface, classLoader: ClassLoader)
         val args = chain.args
         val iconOptions = args.getOrNull(1)
         if (iconOptions != null && iconOptionsClass.isInstance(iconOptions)) {
-          drawFullBleedField.setBoolean(iconOptions, false)
+          // ⚠ 必须用 set() 而不是 setBoolean()：drawFullBleed 是**装箱**的
+          // java.lang.Boolean，而 Field.setBoolean 只接受基本类型 boolean，
+          // 对装箱字段抛 IllegalArgumentException("Not a primitive field")。
+          // 之前用 setBoolean 时每一张桌面图标都会在保护模式里被吞掉一次异常
+          // （真机日志里累计 9994 次），hook 被整体跳过 —— 这个开关从头到尾没生效过。
+          // Field.set() 会自动拆箱，基本类型和装箱类型都成立。
+          drawFullBleedField.set(iconOptions, false)
         }
         chain.proceed(args.toTypedArray())
       }
@@ -733,9 +739,12 @@ private fun hookSplashScreenIcon(xposed: XposedInterface, classLoader: ClassLoad
         xposed.hook(ctor).intercept { chain ->
           val result = chain.proceed(chain.args.toTypedArray())
           runCatching {
-            if (mIsBgComplex.getBoolean(chain.thisObject)) return@runCatching
-            if (mBgColor.getInt(chain.thisObject) == 0) {
-              mIsBgComplex.setBoolean(chain.thisObject, true)
+            // 同 drawFullBleed：用 get()/set() 而不是 getBoolean()/setBoolean()，
+            // 字段是基本类型还是装箱类型都能工作。
+            if (mIsBgComplex.get(chain.thisObject) as? Boolean == true) return@runCatching
+            val bgColor = mBgColor.get(chain.thisObject) as? Int ?: return@runCatching
+            if (bgColor == 0) {
+              mIsBgComplex.set(chain.thisObject, true)
             }
           }
           result
