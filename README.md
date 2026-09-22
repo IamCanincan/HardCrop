@@ -158,6 +158,9 @@ Hooked com.android.settings
 ## 已知取舍
 
 - 快捷设置磁贴（`BIND_QUICK_SETTINGS_TILE`）画的是小尺寸单色图形，被排除在外。
+- **强制动态取色下的遮罩是一律翻转的**：桌面为未适配应用生成的遮罩，HardCrop 全部翻一次，
+  不逐个判断它"原本是不是反的"。绝大多数未适配图标因此变正确；但如果你有个别图标翻完
+  反而变成实心块 / 空心，说明它原本的极性就是对的，目前没有针对单个应用的例外机制。
 - 通知栏小图标、快捷方式以外的小图标走的是别的资源，不受影响。
 - **桌面图标 & 点击过渡动画**：`CircleIconDrawable.getConstantState()` 实现非 null，
   `FloatingIconView.getIconResult()` 取 `newDrawable()` 时不会 NPE，点击不崩（v1.0.2 → v1.0.3）。
