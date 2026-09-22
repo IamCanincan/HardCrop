@@ -132,7 +132,7 @@ private fun install(xposed: XposedInterface, classLoader: ClassLoader, packageNa
     hookPixelLauncher(xposed, classLoader)
     hookTaskIcons(xposed, classLoader)
     // Android 16 强制动态取色：未适配应用由系统生成单色图标，极性写死会反。
-    hookForcedThemedMono(xposed, classLoader)
+    hookForcedThemedMono(xposed, classLoader, packageName)
   }
   if (packageName == "com.android.systemui") hookSplashScreenIcon(xposed, classLoader)
   if (packageName == "com.android.settings") {
@@ -148,6 +148,45 @@ const val ACTION_CLEAR_ICON_CACHE = "com.iamcanincan.hardcrop.CLEAR_ICON_CACHE"
 
 /** 手动"重启自己"的广播 action：App 按包名点名，对应进程里的本模块收到后自杀重启。 */
 const val ACTION_RESTART_SELF = "com.iamcanincan.hardcrop.RESTART_SELF"
+
+/**
+ * 诊断用：切换「单色遮罩翻转」的模式，方便在同一台机器上做 A/B 对照而不用重装模块。
+ *
+ * `mode`：0 = 完全不翻（= 系统原始行为，基线）；1 = 只翻判为反色的（默认，正式行为）；
+ * 2 = 无脑全翻（用来确认"翻转到底有没有传到屏幕上"——如果全翻之后屏幕毫无变化，
+ * 说明我们改的这张位图根本不是被画出去的那张）。
+ */
+const val ACTION_MONO_MODE = "com.iamcanincan.hardcrop.MONO_MODE"
+
+/**
+ * 见 [ACTION_MONO_MODE]。用 `@Volatile`：广播回调在**主线程**，翻转发生在桌面的工作线程。
+ *
+ * ⚠ **必须同时落盘**：收到广播后紧接着要**杀掉桌面进程**重建图标（图标缓存在内存里），
+ * 新进程里的静态变量会回到默认值 —— 那样"关掉对比"就永远对不到基线。
+ * 所以每次设置都写一份到桌面自己的 files 目录，新进程第一次生成图标时再读回来
+ * （只读一次就缓存进内存，不在这条热路径上反复碰文件）。
+ */
+@Volatile private var monoModeLive = -1
+
+@Volatile private var monoModeCached = -1
+
+private const val MONO_MODE_FILE = "hardcrop_mono_mode"
+
+private fun monoModeOf(packageName: String): Int {
+  val live = monoModeLive
+  if (live >= 0) return live
+  val cached = monoModeCached
+  if (cached >= 0) return cached
+  val value =
+    runCatching {
+        File("${launcherDataDir(packageName)}/files/$MONO_MODE_FILE").readText().trim().toInt()
+      }
+      .getOrNull()
+      ?.coerceIn(0, 2)
+      ?: 1
+  monoModeCached = value
+  return value
+}
 
 /**
  * 允许响应"重启自己"的进程白名单。
@@ -283,6 +322,18 @@ private fun registerProcessControlReceiver(context: Context, packageName: String
             Log.d(TAG, "Restart: manual request, restarting $packageName")
             Process.killProcess(Process.myPid())
           }
+          ACTION_MONO_MODE -> {
+            val mode = intent.getIntExtra("mode", 1).coerceIn(0, 2)
+            monoModeLive = mode
+            monoModeCached = mode
+            val persisted =
+              runCatching {
+                  ctx.getFileStreamPath(MONO_MODE_FILE).writeText(mode.toString())
+                  true
+                }
+                .getOrDefault(false)
+            Log.d(TAG, "Mono: mode set to $mode, persisted=$persisted")
+          }
           else -> Log.w(TAG, "ProcessControl: unknown action ${intent?.action}")
         }
       }
@@ -291,6 +342,7 @@ private fun registerProcessControlReceiver(context: Context, packageName: String
     IntentFilter().apply {
       addAction(ACTION_CLEAR_ICON_CACHE)
       addAction(ACTION_RESTART_SELF)
+      addAction(ACTION_MONO_MODE)
     }
   if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
     context.registerReceiver(receiver, filter, Context.RECEIVER_EXPORTED)
@@ -635,7 +687,11 @@ private fun hookPackageInfoCommonUtils(xposed: XposedInterface, classLoader: Cla
  * 且正常自适应图标走的那条分支会 `goto` 跳过另一种算法）。只有前景比背景**暗**
  * （diff < 0）时遮罩才是反的 —— 只在这种情况下翻转，其余原样保留。
  */
-private fun hookForcedThemedMono(xposed: XposedInterface, classLoader: ClassLoader) {
+private fun hookForcedThemedMono(
+  xposed: XposedInterface,
+  classLoader: ClassLoader,
+  packageName: String,
+) {
   val factory =
     classOf("com.android.launcher3.icons.MonochromeIconFactory", classLoader)
       ?: run {
@@ -659,26 +715,34 @@ private fun hookForcedThemedMono(xposed: XposedInterface, classLoader: ClassLoad
         if (self != null) {
           runCatching {
             // generateMono() 结束时 mLuminanceDiff 已经被 wrap() 算好了。
+            val mode = monoModeOf(packageName)
             val diff = diffField.getDouble(self)
             val bitmap = alphaField.get(self) as? Bitmap
-            if (diff < 0) {
+            val coverageBefore =
+              if (bitmap != null && bitmap.config == Bitmap.Config.ALPHA_8) alphaCoverage(bitmap)
+              else -1
+            if (mode != 0) {
               if (bitmap == null) Log.w(TAG, "Mono: mAlphaBitmap is null")
               else if (bitmap.config != Bitmap.Config.ALPHA_8)
                 Log.w(TAG, "Mono: unexpected config ${bitmap.config}, skip")
-              else invertAlphaMask(bitmap)
+              else if (mode == 2 || diff < 0) invertAlphaMask(bitmap)
             }
-            // 限量统计：确认极性判断落在哪一边，以及遮罩到底提没提取出形状
+            // 统计：确认极性判断落在哪一边，以及遮罩到底提没提取出形状
             // （coverage≈100% = 整块实心、根本没字形；≈30~60% = 正常）。
             val total = monoTotal.incrementAndGet()
-            if (diff < 0) monoInverted.incrementAndGet()
-            if (total % 20 == 0) {
-              val coverage =
+            if (mode == 2 || diff < 0) monoInverted.incrementAndGet()
+            val flipped = mode != 0 && (mode == 2 || diff < 0)
+            if (total <= 12) {
+              val coverageAfter =
                 if (bitmap != null && bitmap.config == Bitmap.Config.ALPHA_8) alphaCoverage(bitmap)
                 else -1
               Log.d(
                 TAG,
-                "Mono: $total generated, ${monoInverted.get()} inverted, coverage=$coverage%",
+                "Mono: #$total mode=$mode diff=$diff " +
+                  "cov=$coverageBefore%->$coverageAfter% flipped=$flipped",
               )
+            } else if (total % 20 == 0) {
+              Log.d(TAG, "Mono: $total generated, ${monoInverted.get()} flipped, mode=$mode")
             }
           }.onFailure { Log.w(TAG, "Mono: failed: ${it.message}") }
         }
