@@ -39,10 +39,10 @@
     <string name="scope_systemprocess_desc">系统进程，部分 ROM 在这里解析图标</string>
 
     <string name="scope_launcher_title">com.android.launcher3</string>
-    <string name="scope_launcher_desc">桌面与应用抽屉（类原生 ROM，效果最直观）</string>
+    <string name="scope_launcher_desc">桌面与应用抽屉（类原生 ROM，效果最直观）；Android 16 强制动态取色下，未适配应用的单色图标也在这里修正</string>
 
     <string name="scope_launcher_pixel_title">com.google.android.apps.nexuslauncher</string>
-    <string name="scope_launcher_pixel_desc">桌面与应用抽屉（Pixel / Nexus 专用）</string>
+    <string name="scope_launcher_pixel_desc">桌面与应用抽屉（Pixel / Nexus 专用）；Android 16 强制动态取色下，未适配应用的单色图标也在这里修正</string>
 
     <string name="scope_systemui_title">com.android.systemui</string>
     <string name="scope_systemui_desc">状态栏与最近任务</string>
