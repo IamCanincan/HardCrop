@@ -18,6 +18,7 @@ import android.content.pm.ProviderInfo
 import android.content.pm.ResolveInfo
 import android.content.pm.ServiceInfo
 import android.content.res.Resources
+import android.graphics.Bitmap
 import android.graphics.drawable.AdaptiveIconDrawable
 import android.graphics.drawable.Drawable
 import android.os.Build
@@ -32,6 +33,8 @@ import java.io.File
 import java.lang.reflect.Constructor
 import java.lang.reflect.Field
 import java.lang.reflect.Method
+import java.nio.ByteBuffer
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.concurrent.Volatile
 
 const val TAG = "HardCrop"
@@ -128,6 +131,8 @@ private fun install(xposed: XposedInterface, classLoader: ClassLoader, packageNa
   ) {
     hookPixelLauncher(xposed, classLoader)
     hookTaskIcons(xposed, classLoader)
+    // Android 16 强制动态取色：未适配应用由系统生成单色图标，极性写死会反。
+    hookForcedThemedMono(xposed, classLoader)
   }
   if (packageName == "com.android.systemui") hookSplashScreenIcon(xposed, classLoader)
   if (packageName == "com.android.settings") {
@@ -614,6 +619,107 @@ private fun hookPackageInfoCommonUtils(xposed: XposedInterface, classLoader: Cla
  * 最近任务 / 概览里的卡片图标。`TaskIconCache` 先把图标读成 `BitmapDrawable`，
  * 再包成 `BitmapInfo`；在这个入口上换成裁好的圆形即可。
  */
+/**
+ * Android 16 的「强制动态取色」：没适配单色图标的应用，由桌面现场生成一张单色遮罩
+ * （`com.android.launcher3.icons.MonochromeIconFactory`）。
+ *
+ * ⚠ **它生成的遮罩极性是写死的**：`<init>` 里用一个 `ColorMatrix` 把**亮度**写进 alpha
+ * （矩阵 alpha 行 = 亮度系数），`generateMono()` 再做对比度拉伸（暗 → 透明、亮 → 不透明）。
+ * 于是「**深色字形 + 浅色底**」的图标会被整体反过来 —— 字形变成洞，底色变成图形。
+ *
+ * **为什么不用自己判断适配与否**：桌面只在 `AdaptiveIconDrawable.getMonochrome()` 为 null
+ * （= 应用没提供单色图标）时才 new 这个 Factory，已适配的应用根本不会走到这里。
+ * 所以 hook 这个类**天然只影响未适配应用**。
+ *
+ * **极性怎么判**：`wrap()` 里算过 `mLuminanceDiff = 前景亮度 − 背景亮度`（有符号，
+ * 且正常自适应图标走的那条分支会 `goto` 跳过另一种算法）。只有前景比背景**暗**
+ * （diff < 0）时遮罩才是反的 —— 只在这种情况下翻转，其余原样保留。
+ */
+private fun hookForcedThemedMono(xposed: XposedInterface, classLoader: ClassLoader) {
+  val factory =
+    classOf("com.android.launcher3.icons.MonochromeIconFactory", classLoader)
+      ?: run {
+        // 没有这个类 = 这个 ROM / 这个桌面版本还没有强制取色，不是 bug。
+        Log.w(TAG, "Mono: MonochromeIconFactory not found")
+        return
+      }
+  val diffField = fieldOf(factory, "mLuminanceDiff")
+  val alphaField = fieldOf(factory, "mAlphaBitmap")
+  if (diffField == null || alphaField == null) {
+    Log.w(TAG, "Mono: mLuminanceDiff / mAlphaBitmap not found, skip")
+    return
+  }
+
+  var hooked = 0
+  for (method in declaredMethods(factory, "generateMono")) {
+    runCatching {
+      xposed.hook(method).intercept { chain ->
+        val result = chain.proceed(chain.args.toTypedArray())
+        val self = chain.thisObject
+        if (self != null) {
+          runCatching {
+            // generateMono() 结束时 mLuminanceDiff 已经被 wrap() 算好了。
+            val diff = diffField.getDouble(self)
+            val bitmap = alphaField.get(self) as? Bitmap
+            if (diff < 0) {
+              if (bitmap == null) Log.w(TAG, "Mono: mAlphaBitmap is null")
+              else if (bitmap.config != Bitmap.Config.ALPHA_8)
+                Log.w(TAG, "Mono: unexpected config ${bitmap.config}, skip")
+              else invertAlphaMask(bitmap)
+            }
+            // 限量统计：确认极性判断落在哪一边，以及遮罩到底提没提取出形状
+            // （coverage≈100% = 整块实心、根本没字形；≈30~60% = 正常）。
+            val total = monoTotal.incrementAndGet()
+            if (diff < 0) monoInverted.incrementAndGet()
+            if (total % 20 == 0) {
+              val coverage =
+                if (bitmap != null && bitmap.config == Bitmap.Config.ALPHA_8) alphaCoverage(bitmap)
+                else -1
+              Log.d(
+                TAG,
+                "Mono: $total generated, ${monoInverted.get()} inverted, coverage=$coverage%",
+              )
+            }
+          }.onFailure { Log.w(TAG, "Mono: failed: ${it.message}") }
+        }
+        result
+      }
+      hooked++
+    }
+  }
+  if (hooked > 0) Log.d(TAG, "Mono: $hooked generateMono hooked")
+  else Log.w(TAG, "Mono: generateMono NOT hooked")
+}
+
+/**
+ * 遮罩的"不透明占比"（百分数）。只用于诊断：接近 100 说明整块实心、没提取出字形；
+ * 30~60 才是正常的"图形占一部分"。
+ */
+private fun alphaCoverage(bitmap: Bitmap): Int {
+  val bytes = ByteArray(bitmap.rowBytes * bitmap.height)
+  bitmap.copyPixelsToBuffer(ByteBuffer.wrap(bytes))
+  var sum = 0L
+  for (b in bytes) sum += (b.toInt() and 0xff)
+  return (sum * 100L / (bytes.size * 255L)).toInt()
+}
+
+/** 单色遮罩翻转：ALPHA_8，一个像素一字节，a → 255 - a。 */
+private fun invertAlphaMask(bitmap: Bitmap) {
+  val bytes = ByteArray(bitmap.rowBytes * bitmap.height)
+  val buffer = ByteBuffer.wrap(bytes)
+  bitmap.copyPixelsToBuffer(buffer)
+  for (i in bytes.indices) {
+    bytes[i] = (255 - (bytes[i].toInt() and 0xff)).toByte()
+  }
+  buffer.rewind()
+  bitmap.copyPixelsFromBuffer(buffer)
+}
+
+/** 翻转是热路径（每个图标一次），日志按 20 条汇总一次，不逐条打。 */
+private val monoTotal = AtomicInteger(0)
+
+private val monoInverted = AtomicInteger(0)
+
 private fun hookTaskIcons(xposed: XposedInterface, classLoader: ClassLoader) {
   val cache = classOf("com.android.quickstep.TaskIconCache", classLoader) ?: return
   var hooked = 0
